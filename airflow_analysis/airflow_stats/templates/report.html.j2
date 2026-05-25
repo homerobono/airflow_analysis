@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Airflow Analysis Report</title>
+<style>
+  :root {
+    --fg: #1f2933;
+    --muted: #5b6772;
+    --bg: #fafbfc;
+    --accent: #2b6cb0;
+    --border: #e1e4e8;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         margin: 24px; color: var(--fg); background: var(--bg); }
+  h1 { border-bottom: 2px solid var(--accent); padding-bottom: 6px; }
+  h2 { margin-top: 36px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  h3 { margin-top: 24px; color: var(--accent); }
+  h4 { margin-top: 18px; color: var(--muted); }
+  table { border-collapse: collapse; margin: 8px 0 16px 0; font-size: 12px; }
+  th, td { border: 1px solid var(--border); padding: 4px 8px; text-align: right; }
+  th { background: #eef1f5; text-align: center; }
+  td.lbl, th.lbl { text-align: left; }
+  .plot { margin: 8px 0 18px 0; max-width: 100%; }
+  .plot img { max-width: 100%; height: auto; border: 1px solid var(--border); background: white; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .insight { background: #fffaeb; border-left: 4px solid #d4a017; padding: 8px 12px; margin: 6px 0; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .notes { background: #f6f8fa; padding: 10px 14px; border-radius: 4px; white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  details > summary { cursor: pointer; color: var(--accent); margin: 6px 0; }
+  .tag { display: inline-block; background: #e1efff; color: var(--accent);
+         border-radius: 3px; padding: 1px 6px; font-size: 11px; margin-right: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Airflow Analysis Report</h1>
+<p class="meta">Generated {{ generated_at }} from {{ root }}.</p>
+
+<h2>1. Overview</h2>
+<table>
+  <thead>
+    <tr><th class="lbl">Config</th><th>CSVs</th><th>Rows</th>
+        <th>Sample period (s)</th><th>Sensors</th><th>Has fan map</th></tr>
+  </thead>
+  <tbody>
+  {% for c in configs %}
+    <tr>
+      <td class="lbl"><strong>Config {{ c.name }}</strong></td>
+      <td>{{ c.n_csvs }}</td>
+      <td>{{ "{:,}".format(c.n_rows) }}</td>
+      <td>{{ "%.2f"|format(c.sample_period_s) if c.sample_period_s == c.sample_period_s else "n/a" }}</td>
+      <td>{{ c.n_sensors }}</td>
+      <td>{{ "yes" if c.has_fan_map else "no" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if insights %}
+<h2>2. Insights</h2>
+{% for ins in insights %}
+  <div class="insight">{{ ins }}</div>
+{% endfor %}
+{% endif %}
+
+<h2>3. Per-Configuration Details</h2>
+{% for c in configs %}
+  <h3>Config {{ c.name }}</h3>
+  <details><summary>Setup notes</summary>
+    <div class="notes">{{ c.notes or "(empty setup.md)" }}</div>
+    {% if c.fan_map %}
+      <p class="meta">Fan map:
+        {% for header, slot in c.fan_map.items() %}<span class="tag">{{ header }} &rarr; {{ slot }}</span>{% endfor %}
+      </p>
+    {% endif %}
+  </details>
+
+  <h4>Sensor summary (key channels)</h4>
+  {{ c.summary_html|safe }}
+
+  {% if c.plot_violin %}
+  <h4>Hotspot temperature distributions</h4>
+  <div class="plot"><img alt="violin temps" src="data:image/png;base64,{{ c.plot_violin }}"></div>
+  {% endif %}
+
+  <div class="grid">
+    {% if c.plot_cpu_load_bins %}
+      <div class="plot"><img alt="cpu load bins" src="data:image/png;base64,{{ c.plot_cpu_load_bins }}"></div>
+    {% endif %}
+    {% if c.plot_gpu_load_bins %}
+      <div class="plot"><img alt="gpu load bins" src="data:image/png;base64,{{ c.plot_gpu_load_bins }}"></div>
+    {% endif %}
+  </div>
+
+  {% if c.plot_fan_curves %}
+    <h4>Fan curves vs hotspot temperatures</h4>
+    <div class="grid">
+    {% for img in c.plot_fan_curves %}
+      <div class="plot"><img alt="fan curve" src="data:image/png;base64,{{ img }}"></div>
+    {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if c.plot_corr %}
+    <h4>Correlation heatmap (Spearman, |r| &ge; 0.2)</h4>
+    <div class="plot"><img alt="corr heatmap" src="data:image/png;base64,{{ c.plot_corr }}"></div>
+  {% endif %}
+
+  {% if c.lag_html %}
+    <h4>Load &rarr; temperature lag (Pearson at best lag)</h4>
+    {{ c.lag_html|safe }}
+  {% endif %}
+
+  {% if c.plot_timeline %}
+    <h4>Hotspot timeline</h4>
+    <div class="plot"><img alt="timeline" src="data:image/png;base64,{{ c.plot_timeline }}"></div>
+  {% endif %}
+{% endfor %}
+
+{% if comparison and comparison.configs|length > 1 %}
+<h2>4. Cross-Configuration Comparison</h2>
+<p class="meta">Baseline: <strong>Config {{ comparison.baseline }}</strong>. Deltas below are
+<em>other minus baseline</em> at matched load deciles; negative values mean the other config runs cooler.</p>
+
+<h3>4a. Matched-load median temperatures</h3>
+<div class="grid">
+{% for img in comparison.matched_plots %}
+  <div class="plot"><img alt="matched temps" src="data:image/png;base64,{{ img }}"></div>
+{% endfor %}
+</div>
+
+<h3>4b. Delta heatmaps (vs baseline)</h3>
+<div class="grid">
+{% for img in comparison.delta_plots %}
+  <div class="plot"><img alt="delta heatmap" src="data:image/png;base64,{{ img }}"></div>
+{% endfor %}
+</div>
+
+<h3>4c. Fan efficiency (slope of temp vs RPM under load)</h3>
+{% if comparison.fan_eff_html %}
+  {{ comparison.fan_eff_html|safe }}
+{% else %}
+  <p class="meta">Not enough variation to estimate fan slopes.</p>
+{% endif %}
+{% endif %}
+
+<p class="meta" style="margin-top: 40px">airflow_stats v{{ version }}</p>
+</body>
+</html>

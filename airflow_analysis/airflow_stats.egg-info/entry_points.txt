@@ -1,0 +1,2 @@
+[console_scripts]
+airflow-stats = airflow_stats.cli:main
