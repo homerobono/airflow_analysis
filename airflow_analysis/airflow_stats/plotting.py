@@ -67,11 +67,18 @@ def violin_temps(
 def lowess_scatter(
     x: pd.Series, y: pd.Series, x_label: str, y_label: str, title: str
 ) -> str | None:
-    """Scatter + LOWESS curve of y vs x."""
+    """Scatter + LOWESS curve of y vs x.
+
+    Returns ``None`` (and the caller silently skips the plot) when either
+    series is constant - typically because a fan header isn't physically
+    connected and reads 0 the whole time.
+    """
     x = pd.to_numeric(x, errors="coerce")
     y = pd.to_numeric(y, errors="coerce")
     joined = pd.concat([x, y], axis=1).dropna()
     if len(joined) < 20:
+        return None
+    if joined.iloc[:, 0].std() == 0 or joined.iloc[:, 1].std() == 0:
         return None
     fig, ax = plt.subplots(figsize=(6, 4))
     sns.regplot(
@@ -128,6 +135,20 @@ def correlation_heatmap(
         cbar_kws={"shrink": 0.6},
         ax=ax,
     )
+
+    # Paint cells whose correlation is exactly +/-1 black, INCLUDING the
+    # diagonal (which is trivially 1 by definition). Off-diagonal black cells
+    # flag sensor pairs that carry no extra information beyond each other.
+    sub_vals = sub.to_numpy()
+    rows, cols = sub_vals.shape
+    for i in range(rows):
+        for j in range(cols):
+            v = sub_vals[i, j]
+            if i == j or (pd.notna(v) and abs(abs(float(v)) - 1.0) < 1e-9):
+                ax.add_patch(
+                    plt.Rectangle((j, i), 1, 1, facecolor="black", edgecolor="none")
+                )
+
     ax.set_title(title)
     ax.tick_params(axis="x", rotation=60)
     ax.tick_params(axis="y", rotation=0)
@@ -140,10 +161,22 @@ def load_binned_heatmap(
     cbar_label: str = "C",
     diverging: bool = False,
 ) -> str | None:
-    """Heatmap of a (bin x sensor) matrix."""
+    """Heatmap of a (bin x sensor) matrix.
+
+    Columns whose values are all zero (or all NaN) are dropped from the plot:
+    they convey no information and just stretch the colorbar's lower bound.
+    """
     if matrix is None or matrix.empty:
         return None
     df = matrix.drop(columns=[c for c in matrix.columns if c == "__n__"], errors="ignore")
+    if df.empty:
+        return None
+    # Drop columns that are entirely zero (treating NaNs as missing, not zero).
+    nonzero_cols = [
+        c for c in df.columns
+        if df[c].dropna().abs().gt(0).any()
+    ]
+    df = df[nonzero_cols]
     if df.empty:
         return None
     fig, ax = plt.subplots(figsize=(max(5, df.shape[1] * 0.7 + 2), max(3.5, df.shape[0] * 0.4 + 1)))
@@ -180,6 +213,86 @@ def grouped_bar(
     ax.set_xlabel("")
     ax.legend(loc="best", fontsize=8)
     ax.tick_params(axis="x", rotation=30)
+    return _fig_to_b64(fig)
+
+
+def fan_impact_heatmap(
+    impact: pd.DataFrame,
+    tolerance: pd.DataFrame | None,
+    title: str,
+    min_tolerance: float = 0.10,
+    vmax_abs: float | None = None,
+) -> str | None:
+    """Heatmap of the fan-impact matrix.
+
+    ``impact`` is degC per +1000 RPM with fans as rows and temperatures as
+    columns. Negative cells (cooling) render blue, positive red; cells with
+    tolerance below ``min_tolerance`` are overlaid with a hatch pattern to
+    flag that the regression couldn't separate that fan from the others.
+    """
+    if impact is None or impact.empty:
+        return None
+    df = impact.copy().astype(float)
+    if df.dropna(how="all").empty:
+        return None
+
+    if vmax_abs is None:
+        finite = df.to_numpy()
+        finite = finite[np.isfinite(finite)]
+        if finite.size == 0:
+            return None
+        # Symmetric scale so 0 is in the middle of the colorbar.
+        vmax_abs = float(max(2.0, np.percentile(np.abs(finite), 95)))
+
+    n_rows, n_cols = df.shape
+    fig, ax = plt.subplots(
+        figsize=(max(6, n_cols * 1.2 + 2), max(3.5, n_rows * 0.55 + 1.5))
+    )
+    sns.heatmap(
+        df,
+        cmap="RdBu_r",
+        center=0.0,
+        vmin=-vmax_abs,
+        vmax=vmax_abs,
+        annot=True,
+        fmt=".2f",
+        cbar_kws={"label": "C per +1000 RPM (lower = more cooling)"},
+        ax=ax,
+        linewidths=0.4,
+        linecolor="white",
+    )
+
+    if tolerance is not None and not tolerance.empty:
+        # Hatch cells whose fan is collinear with the rest of the regressors.
+        # The hatch is drawn as a transparent rectangle layered on top of the
+        # heatmap cell.
+        tol = tolerance.reindex_like(df)
+        for i, fan in enumerate(df.index):
+            for j, target in enumerate(df.columns):
+                v = df.iat[i, j]
+                t = tol.iat[i, j] if (i < tol.shape[0] and j < tol.shape[1]) else np.nan
+                if pd.isna(v):
+                    ax.add_patch(
+                        plt.Rectangle(
+                            (j, i), 1, 1,
+                            facecolor="#f0f0f0", edgecolor="none",
+                        )
+                    )
+                    continue
+                if pd.notna(t) and float(t) < min_tolerance:
+                    ax.add_patch(
+                        plt.Rectangle(
+                            (j, i), 1, 1,
+                            fill=False, hatch="////",
+                            edgecolor="#444", linewidth=0,
+                        )
+                    )
+
+    ax.set_title(title)
+    ax.set_xlabel("Temperature target")
+    ax.set_ylabel("Fan position")
+    ax.tick_params(axis="x", rotation=30)
+    ax.tick_params(axis="y", rotation=0)
     return _fig_to_b64(fig)
 
 

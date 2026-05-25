@@ -18,12 +18,14 @@ import pandas as pd
 _MB_TEMP = re.compile(r"^/lpc/[^/]+/\d+/temperature/\d+$", re.IGNORECASE)
 _MB_FAN_RPM = re.compile(r"^/lpc/[^/]+/\d+/fan/\d+$", re.IGNORECASE)
 _MB_FAN_PCT = re.compile(r"^/lpc/[^/]+/\d+/control/\d+$", re.IGNORECASE)
+_MB_VOLTAGE = re.compile(r"^/lpc/[^/]+/\d+/voltage/\d+$", re.IGNORECASE)
 
 # CPU.
 _CPU_TEMP = re.compile(r"^/(amd|intel)cpu/\d+/temperature/\d+$", re.IGNORECASE)
 _CPU_LOAD = re.compile(r"^/(amd|intel)cpu/\d+/load/\d+$", re.IGNORECASE)
 _CPU_POWER = re.compile(r"^/(amd|intel)cpu/\d+/power/\d+$", re.IGNORECASE)
 _CPU_CLOCK = re.compile(r"^/(amd|intel)cpu/\d+/clock/\d+$", re.IGNORECASE)
+_CPU_VOLTAGE = re.compile(r"^/(amd|intel)cpu/\d+/voltage/\d+$", re.IGNORECASE)
 
 # GPU (covers nvidia and amd).
 _GPU_TEMP = re.compile(r"^/gpu-(nvidia|amd)/\d+/temperature/\d+$", re.IGNORECASE)
@@ -31,6 +33,8 @@ _GPU_LOAD = re.compile(r"^/gpu-(nvidia|amd)/\d+/load/\d+$", re.IGNORECASE)
 _GPU_POWER = re.compile(r"^/gpu-(nvidia|amd)/\d+/power/\d+$", re.IGNORECASE)
 _GPU_FAN_RPM = re.compile(r"^/gpu-(nvidia|amd)/\d+/fan/\d+$", re.IGNORECASE)
 _GPU_FAN_PCT = re.compile(r"^/gpu-(nvidia|amd)/\d+/control/\d+$", re.IGNORECASE)
+_GPU_CLOCK = re.compile(r"^/gpu-(nvidia|amd)/\d+/clock/\d+$", re.IGNORECASE)
+_GPU_VOLTAGE = re.compile(r"^/gpu-(nvidia|amd)/\d+/voltage/\d+$", re.IGNORECASE)
 
 # Memory / RAM.
 _RAM_TEMP = re.compile(r"^/memory/dimm/\d+/temperature/\d+$", re.IGNORECASE)
@@ -51,17 +55,21 @@ class SensorSchema:
     mb_temps: list[str] = field(default_factory=list)
     mb_fans_rpm: list[str] = field(default_factory=list)
     mb_fans_pct: list[str] = field(default_factory=list)
+    mb_voltages: list[str] = field(default_factory=list)
 
     cpu_temps: list[str] = field(default_factory=list)
     cpu_loads: list[str] = field(default_factory=list)
     cpu_power: list[str] = field(default_factory=list)
     cpu_clocks: list[str] = field(default_factory=list)
+    cpu_voltages: list[str] = field(default_factory=list)
 
     gpu_temps: list[str] = field(default_factory=list)
     gpu_loads: list[str] = field(default_factory=list)
     gpu_power: list[str] = field(default_factory=list)
     gpu_fans_rpm: list[str] = field(default_factory=list)
     gpu_fans_pct: list[str] = field(default_factory=list)
+    gpu_clocks: list[str] = field(default_factory=list)
+    gpu_voltages: list[str] = field(default_factory=list)
 
     ram_temps: list[str] = field(default_factory=list)
     storage_temps: list[str] = field(default_factory=list)
@@ -102,6 +110,8 @@ def classify(df: pd.DataFrame) -> SensorSchema:
             schema.mb_fans_rpm.append(col)
         elif _MB_FAN_PCT.match(col):
             schema.mb_fans_pct.append(col)
+        elif _MB_VOLTAGE.match(col):
+            schema.mb_voltages.append(col)
         elif _CPU_TEMP.match(col):
             schema.cpu_temps.append(col)
         elif _CPU_LOAD.match(col):
@@ -110,6 +120,8 @@ def classify(df: pd.DataFrame) -> SensorSchema:
             schema.cpu_power.append(col)
         elif _CPU_CLOCK.match(col):
             schema.cpu_clocks.append(col)
+        elif _CPU_VOLTAGE.match(col):
+            schema.cpu_voltages.append(col)
         elif _GPU_TEMP.match(col):
             schema.gpu_temps.append(col)
         elif _GPU_LOAD.match(col):
@@ -120,6 +132,10 @@ def classify(df: pd.DataFrame) -> SensorSchema:
             schema.gpu_fans_rpm.append(col)
         elif _GPU_FAN_PCT.match(col):
             schema.gpu_fans_pct.append(col)
+        elif _GPU_CLOCK.match(col):
+            schema.gpu_clocks.append(col)
+        elif _GPU_VOLTAGE.match(col):
+            schema.gpu_voltages.append(col)
         elif _RAM_TEMP.match(col):
             schema.ram_temps.append(col)
         elif _STORAGE_TEMP.match(col):

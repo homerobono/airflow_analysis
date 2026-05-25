@@ -30,12 +30,233 @@
   details > summary { cursor: pointer; color: var(--accent); margin: 6px 0; }
   .tag { display: inline-block; background: #e1efff; color: var(--accent);
          border-radius: 3px; padding: 1px 6px; font-size: 11px; margin-right: 4px; }
+
+  /* Cooling KPI banner */
+  .kpi-banner { background: linear-gradient(135deg, #e6f0fb 0%, #f5f0ff 100%);
+                border: 1px solid #c7d6ea; border-radius: 8px;
+                padding: 18px 22px; margin: 18px 0 8px 0; }
+  .kpi-banner h2 { border: none; margin: 0 0 6px 0; padding: 0;
+                   color: var(--accent); font-size: 20px; }
+  .kpi-banner .verdict { font-size: 15px; color: var(--fg); margin: 4px 0 14px 0; }
+  .kpi-banner .verdict strong { color: var(--accent); }
+  .kpi-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+               gap: 12px; margin-top: 8px; }
+  .kpi-card { background: white; border: 1px solid var(--border);
+              border-radius: 6px; padding: 10px 14px; }
+  .kpi-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase;
+                     letter-spacing: 0.04em; }
+  .kpi-card .value { font-size: 22px; font-weight: 600; color: var(--fg);
+                     margin-top: 2px; }
+  .kpi-card .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .kpi-card.winner { border-color: #2b6cb0; background: #f0f6fc; }
+  .kpi-card.winner .value { color: var(--accent); }
+  .kpi-section table { width: 100%; }
+  .kpi-section th.first, .kpi-section td.first { text-align: left; }
+  .kpi-section tr.winner-row { background: #f0f6fc; }
+  .kpi-section tr.winner-row td.first::before { content: "\2605  "; color: var(--accent); }
+  .kpi-legend { font-size: 12px; color: var(--muted); margin: 10px 0 0 0; }
+  .kpi-legend li { margin: 2px 0; }
 </style>
 </head>
 <body>
 
 <h1>Airflow Analysis Report</h1>
 <p class="meta">Generated {{ generated_at }} from {{ root }}.</p>
+
+{% if cooling and cooling.summary_rows %}
+<section class="kpi-banner kpi-section">
+  <h2>Cooling Performance &mdash; Headline KPIs</h2>
+  {% if cooling.multi and cooling.winner %}
+    <p class="verdict">
+      Best cooling per resource utilization:
+      <strong>Config {{ cooling.winner }}</strong>
+      (score {{ cooling.ranking[0].score_fmt }} / 100).
+      Higher cooling score = lower hotspot rise over ambient and lower
+      fan RPM under load.
+    </p>
+  {% else %}
+    <p class="verdict">
+      Single config measured. Add more <code>Config X/</code> folders to
+      rank them; metrics below already show this config's cooling efficiency
+      independent of workload.
+    </p>
+  {% endif %}
+
+  {# Top-line KPI cards: one per config, showing the headline score and the
+     two most decision-relevant numbers (CPU/GPU temp rise over ambient and
+     fan RPM under load). #}
+  <div class="kpi-cards">
+    {% for row in cooling.summary_rows %}
+      {% set is_winner = cooling.winner == row.name %}
+      <div class="kpi-card {% if is_winner %}winner{% endif %}">
+        <div class="label">Config {{ row.name }} &middot; Cooling Score</div>
+        <div class="value">{{ row.fmt.cooling_score }} / 100</div>
+        <div class="sub">
+          CPU rise {{ row.fmt.cpu_rise }} &middot;
+          GPU rise {{ row.fmt.gpu_rise }}<br>
+          Fans @ load: {{ row.fmt.high_load_fan_rpm_total }} &middot;
+          Ambient {{ row.fmt.ambient_median }}<br>
+          Workload intensity: {{ row.fmt.workload_score }} / 100
+          (CPU {{ row.fmt.workload_cpu_clock_ghz }} @ {{ row.fmt.workload_cpu_vcore_v }},
+           {{ row.fmt.workload_cpu_pkg_w }};
+           GPU {{ row.fmt.workload_gpu_clock_mhz }} @ {{ row.fmt.workload_gpu_voltage_v }},
+           {{ row.fmt.workload_gpu_pkg_w }})
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <h3 style="margin-top: 22px;">Cooling KPIs per configuration</h3>
+  <table>
+    <thead>
+      <tr>
+        <th class="first lbl">Config</th>
+        <th>Cooling score<br>(higher = better)</th>
+        <th>Ambient<br>(System sensor)</th>
+        <th>CPU @ high load<br>median</th>
+        <th>CPU rise<br>over ambient</th>
+        <th>CPU cooling<br>efficiency (C/W)</th>
+        <th>CPU headroom<br>to 95 C (p95)</th>
+        <th>GPU hotspot @ high load<br>median</th>
+        <th>GPU rise<br>over ambient</th>
+        <th>GPU cooling<br>efficiency (C/W)</th>
+        <th>GPU headroom<br>to 90 C (p95)</th>
+        <th>Total fan RPM<br>@ high load</th>
+        <th>Workload intensity<br>(0..100, higher = harder)</th>
+        <th>% samples<br>at high load</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in cooling.summary_rows %}
+        {% set is_winner = cooling.winner == row.name %}
+        <tr class="{% if is_winner %}winner-row{% endif %}">
+          <td class="first lbl"><strong>Config {{ row.name }}</strong></td>
+          <td>{{ row.fmt.cooling_score }}</td>
+          <td>{{ row.fmt.ambient_median }}</td>
+          <td>{{ row.fmt.cpu_high_load_median }}</td>
+          <td>{{ row.fmt.cpu_rise }}</td>
+          <td>{{ row.fmt.cpu_c_per_w }}</td>
+          <td>{{ row.fmt.cpu_headroom }}</td>
+          <td>{{ row.fmt.gpu_high_load_median }}</td>
+          <td>{{ row.fmt.gpu_rise }}</td>
+          <td>{{ row.fmt.gpu_c_per_w }}</td>
+          <td>{{ row.fmt.gpu_headroom }}</td>
+          <td>{{ row.fmt.high_load_fan_rpm_total }}</td>
+          <td>{{ row.fmt.workload_score }}<br>
+              <span style="font-size:10px;color:var(--muted)">
+                CPU {{ row.fmt.workload_cpu_intensity }} /
+                GPU {{ row.fmt.workload_gpu_intensity }}
+              </span></td>
+          <td>{{ row.fmt.high_load_fraction_pct }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <details>
+    <summary>Workload intensity detail (clocks, voltages, power under load)</summary>
+    <table>
+      <thead>
+        <tr>
+          <th class="first lbl">Config</th>
+          <th>Intensity score</th>
+          <th>CPU intensity</th>
+          <th>CPU clock</th>
+          <th>CPU Vcore</th>
+          <th>CPU pkg power</th>
+          <th>GPU intensity</th>
+          <th>GPU clock</th>
+          <th>GPU voltage</th>
+          <th>GPU pkg power</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cooling.summary_rows %}
+          <tr>
+            <td class="first lbl"><strong>Config {{ row.name }}</strong></td>
+            <td>{{ row.fmt.workload_score }} / 100</td>
+            <td>{{ row.fmt.workload_cpu_intensity }} / 100</td>
+            <td>{{ row.fmt.workload_cpu_clock_ghz }}</td>
+            <td>{{ row.fmt.workload_cpu_vcore_v }}</td>
+            <td>{{ row.fmt.workload_cpu_pkg_w }}</td>
+            <td>{{ row.fmt.workload_gpu_intensity }} / 100</td>
+            <td>{{ row.fmt.workload_gpu_clock_mhz }}</td>
+            <td>{{ row.fmt.workload_gpu_voltage_v }}</td>
+            <td>{{ row.fmt.workload_gpu_pkg_w }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+
+  <details>
+    <summary>Per-hotspot detail (median, p95, rise, C/W, headroom)</summary>
+    <table>
+      <thead>
+        <tr>
+          <th class="first lbl">Config</th>
+          <th class="first lbl">Hotspot</th>
+          <th>Median (C)</th>
+          <th>Median @ high load (C)</th>
+          <th>p95 (C)</th>
+          <th>Rise over ambient (C)</th>
+          <th>Median power (W)</th>
+          <th>Cooling eff. (C/W)</th>
+          <th>Headroom to throttle (C)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cooling.detail_rows %}
+          <tr>
+            <td class="first lbl">{{ row.config }}</td>
+            <td class="first lbl">{{ row.hotspot }}</td>
+            <td>{{ row.fmt.median }}</td>
+            <td>{{ row.fmt.high_load_median }}</td>
+            <td>{{ row.fmt.p95 }}</td>
+            <td>{{ row.fmt.rise_over_ambient }}</td>
+            <td>{{ row.fmt.median_power_w }}</td>
+            <td>{{ row.fmt.c_per_watt }}</td>
+            <td>{{ row.fmt.headroom }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+
+  <ul class="kpi-legend">
+    <li><strong>Cooling score (0..100, higher is better):</strong>
+        70% temperature rise over ambient (under high load) + 30% total
+        fan RPM (under high load). Inside the temperature term: CPU 40
+        points, GPU 30 points, VRM 10 points (CPU outweighs GPU by 10,
+        VRM is the tiebreaker). Anchors: 0 C adjusted rise &rarr; 100,
+        40 C &rarr; 0; 0 RPM &rarr; 100, 8000 RPM &rarr; 0.</li>
+    <li><strong>Workload-intensity compensation:</strong> the score forgives
+        up to 10 C of extra hotspot rise proportional to the workload
+        intensity (clocks, voltages, power under load). A pegged-out system
+        is genuinely producing more heat &mdash; that's not the airflow's
+        fault &mdash; so it gets a credit. An idle/light run gets no credit
+        and its temps must speak for themselves.</li>
+    <li><strong>Workload intensity (0..100):</strong> mean of CPU and GPU
+        sub-scores. Each sub-score averages clock, voltage and power scaled
+        against typical desktop maxima (CPU: 5.0 GHz, 0.9&ndash;1.4 V, 150 W;
+        GPU: 3.0 GHz, 0.7&ndash;1.1 V, 350 W). 100 means the silicon was
+        running flat out during the load samples.</li>
+    <li><strong>Rise over ambient (C):</strong> hotspot median minus the
+        motherboard "System" sensor. Cancels out room-temperature differences
+        between sessions.</li>
+    <li><strong>Cooling efficiency (C/W):</strong> rise over ambient divided
+        by that component's median power draw while loaded. Lower = the
+        cooler removes more heat per watt produced.</li>
+    <li><strong>High load:</strong> samples where CPU load &ge; 10%
+        <em>or</em> GPU load &ge; 30%. The CPU gate is intentionally low
+        because a powerful CPU heats up even at light loads; the GPU gate
+        is higher because GPUs stay cool until they're actively rendering.</li>
+    <li><strong>Headroom to throttle (C):</strong> distance from the 95th
+        percentile temperature to the throttling threshold
+        (CPU 95 C, GPU hot spot 90 C, VRM 100 C). Bigger = safer.</li>
+  </ul>
+</section>
+{% endif %}
 
 <h2>1. Overview</h2>
 <table>
@@ -103,8 +324,109 @@
   {% endif %}
 
   {% if c.plot_corr %}
-    <h4>Correlation heatmap (Spearman, |r| &ge; 0.2)</h4>
+    <h4>Correlation heatmap (Spearman, |r| &ge; 0.3)</h4>
+    <p class="meta">Black cells mark |r| = 1: the diagonal (trivially self-correlated)
+    plus any off-diagonal pair that carries no extra information beyond the other.
+    Note: raw correlation between fan RPM and temperature can be misleading because
+    fans ramp <em>up</em> when temperatures rise &mdash; see the Fan Impact Matrix
+    below for a controlled answer to "which fan cools which sensor".</p>
     <div class="plot"><img alt="corr heatmap" src="data:image/png;base64,{{ c.plot_corr }}"></div>
+  {% endif %}
+
+  {% if c.plot_fan_impact %}
+    <h4>Fan Impact Matrix &mdash; which fan cools which sensor</h4>
+    <p class="meta">
+      Each cell is the change in that temperature (in &deg;C) per +1000 RPM of
+      that fan, <em>after</em> controlling for CPU load, GPU load, CPU package
+      power, GPU package power, ambient (System sensor), and every other fan in
+      the case. Restricted to warm samples (CPU load &ge; 10% or GPU load &ge;
+      30%). <strong>Negative (blue) = cooling.</strong> More negative is better.
+      Cells with a hatch pattern have low tolerance (this fan moves nearly
+      identically to another fan in the data, so its individual effect can't be
+      separated reliably; the sign is OK but the magnitude isn't).
+    </p>
+    <div class="plot"><img alt="fan impact matrix" src="data:image/png;base64,{{ c.plot_fan_impact }}"></div>
+
+    {% if c.fan_impact_best %}
+      <h4>Best fan per temperature target</h4>
+      <table>
+        <thead>
+          <tr>
+            <th class="lbl">Temperature target</th>
+            <th class="lbl">Most-cooling fan</th>
+            <th>C per +1000 RPM</th>
+            <th>Tolerance</th>
+            <th>n</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in c.fan_impact_best %}
+            <tr>
+              <td class="lbl">{{ row.target }}</td>
+              <td class="lbl">{{ row.fan }}</td>
+              <td>{{ row.fmt.c_per_1000_rpm }}</td>
+              <td>{{ row.fmt.tolerance }}</td>
+              <td>{{ row.n }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    {% if c.fan_impact_r2 %}
+      <details>
+        <summary>Regression fit quality (R&sup2; per target)</summary>
+        <table>
+          <thead>
+            <tr><th class="lbl">Temperature target</th><th>R&sup2;</th></tr>
+          </thead>
+          <tbody>
+            {% for row in c.fan_impact_r2 %}
+              <tr><td class="lbl">{{ row.target }}</td><td>{{ row.r2_fmt }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="meta">R&sup2; near 1.0 means load + power + ambient + fans
+        explain almost all of that target's variance under load. Low R&sup2;
+        means there's something going on the model can't see (turbulence,
+        dust, GPU memory access patterns, etc.) and the fan coefficients
+        should be read with that caveat.</p>
+      </details>
+    {% endif %}
+
+    {% if c.fan_impact_rows %}
+      <details>
+        <summary>Full fan-impact table</summary>
+        <table>
+          <thead>
+            <tr>
+              <th class="lbl">Fan</th>
+              <th class="lbl">Target</th>
+              <th>C per +1000 RPM</th>
+              <th>Tolerance</th>
+              <th>n</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in c.fan_impact_rows %}
+              <tr>
+                <td class="lbl">{{ row.fan }}</td>
+                <td class="lbl">{{ row.target }}</td>
+                <td>{{ row.fmt.c_per_1000_rpm }}</td>
+                <td>{{ row.fmt.tolerance }}</td>
+                <td>{{ row.n }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
+
+    {% if c.fan_impact_notes %}
+      {% for note in c.fan_impact_notes %}
+        <p class="insight" style="background:#fff5f5;border-left-color:#c0392b">{{ note }}</p>
+      {% endfor %}
+    {% endif %}
   {% endif %}
 
   {% if c.lag_html %}

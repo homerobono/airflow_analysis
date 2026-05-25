@@ -123,14 +123,54 @@ def _read_one_csv(path: Path) -> tuple[pd.DataFrame, dict[str, str]] | None:
     return df, labels
 
 
+# Fan RPM channels we always preserve, even when flat (e.g. an unused header
+# reading 0 in this config may carry a real fan in a future config and we
+# want the schema to stay aligned across configs).
+_FAN_RPM_RE = re.compile(
+    r"^/(lpc/[^/]+/\d+|gpu-(?:nvidia|amd)/\d+)/fan/\d+(#\d+)?$",
+    re.IGNORECASE,
+)
+
+
 def _drop_near_constant(df: pd.DataFrame, tol: float = 1e-9) -> pd.DataFrame:
-    """Remove columns whose std is effectively zero or that are entirely NaN."""
+    """Remove columns whose std is effectively zero or that are entirely NaN.
+
+    Fan-RPM columns are always preserved even when flat, so disconnected-fan
+    headers like ``System Fan #2`` stay in the schema for cross-config
+    comparison.
+    """
     if df.empty:
         return df
     std = df.std(numeric_only=True)
-    keep = std[std.abs() > tol].index.tolist()
-    # Always keep at least the Time index intact (it's an index, not a column).
+    moving = std[std.abs() > tol].index.tolist()
+    pinned = [c for c in df.columns if _FAN_RPM_RE.match(c)]
+    keep = list(dict.fromkeys(moving + pinned))
     return df[keep]
+
+
+# Fan duty % columns we drop in favor of the matched RPM reading. LHM exposes
+# both /lpc/.../control/N (0-100 %) and /lpc/.../fan/N (actual RPM) for the
+# same physical fan; the RPM reading is the measured value, the control is
+# just the commanded duty cycle and would otherwise be perfectly correlated
+# with itself across the channel. We keep RPM and drop control.
+_FAN_CONTROL_RE = re.compile(
+    r"^/(lpc/[^/]+/\d+|gpu-(?:nvidia|amd)/\d+)/control/\d+(#\d+)?$",
+    re.IGNORECASE,
+)
+
+
+def _drop_fan_control_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Drop fan control % columns; keep matching RPM columns.
+
+    Returns the trimmed DataFrame and the list of dropped column names so the
+    caller can log them.
+    """
+    if df.empty:
+        return df, []
+    dropped = [c for c in df.columns if _FAN_CONTROL_RE.match(c)]
+    if not dropped:
+        return df, []
+    return df.drop(columns=dropped), dropped
 
 
 def discover_configs(root: Path) -> list[Path]:
@@ -176,6 +216,14 @@ def load_config(config_dir: Path) -> ConfigData | None:
 
     big = pd.concat(frames, axis=0, join="outer", sort=False).sort_index()
     big = big[~big.index.duplicated(keep="first")]
+
+    big, dropped_ctrl = _drop_fan_control_columns(big)
+    if dropped_ctrl:
+        _logger.info(
+            "%s: dropped %d fan control %% columns (kept matching RPM).",
+            config_dir, len(dropped_ctrl),
+        )
+
     before = big.shape[1]
     big = _drop_near_constant(big)
     dropped = before - big.shape[1]
