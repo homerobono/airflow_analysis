@@ -1,0 +1,707 @@
+{
+  "__VERSION__": "268",
+  "FanControl": {
+    "Controls": [
+      {
+        "NickName": "CPU Fan",
+        "Identifier": "/lpc/nct6687dr/control/0",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "CPU_Heatsink_Curve",
+          "OneWayHysteresis": true,
+          "Points": [
+            "30,15",
+            "45,22",
+            "52,28",
+            "58,40",
+            "64,58",
+            "70,75",
+            "78,90",
+            "82,95",
+            "84,100"
+          ],
+          "SelectedHysteresis": 2,
+          "SelectedIndex": 0,
+          "SelectedIndexTemp": 30.0,
+          "SelectedIndexValue": 15.0,
+          "SelectedResponseTime": 2,
+          "SelectedTempSource": {
+            "Identifier": "/amdcpu/0/temperature/2",
+            "IsHidden": false,
+            "Name": "Core (Tctl/Tdie)"
+          }
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/lpc/nct6687dr/fan/0"
+        },
+        "SelectedStart": 22,
+        "SelectedStop": 16,
+        "MinimumPercent": 15,
+        "SelectedCommandStepUp": 25,
+        "SelectedCommandStepDown": 5,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [10, 0, false],
+          [20, 396, false],
+          [30, 652, false],
+          [40, 876, false],
+          [50, 1080, false],
+          [60, 1261, false],
+          [70, 1434, false],
+          [80, 1606, false],
+          [90, 1758, false],
+          [100, 1929, false]
+        ]
+      },
+      {
+        "NickName": "Pump Fan",
+        "Identifier": "/lpc/nct6687dr/control/1",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "Pump_Front2_Mix",
+          "Identifier": "Mix/Mix",
+          "SelectedMixFunction": 1,
+          "SelectedFanCurves": [
+            {
+              "Name": "Pump_CPU_Component",
+              "OneWayHysteresis": true,
+              "Points": [
+                "35,0",
+                "42,0",
+                "50,20",
+                "56,38",
+                "62,52",
+                "68,68",
+                "74,82",
+                "80,95",
+                "84,100"
+              ],
+              "SelectedHysteresis": 3,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 35.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 3,
+              "SelectedTempSource": {
+                "Identifier": "/amdcpu/0/temperature/2",
+                "IsHidden": false,
+                "Name": "Core (Tctl/Tdie)"
+              }
+            },
+            {
+              "Name": "Pump_GPU_Component",
+              "OneWayHysteresis": true,
+              "Points": [
+                "35,0",
+                "45,0",
+                "55,15",
+                "62,28",
+                "68,42",
+                "74,58",
+                "80,75",
+                "86,90"
+              ],
+              "SelectedHysteresis": 3,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 35.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 3,
+              "SelectedTempSource": {
+                "Identifier": "/gpu-nvidia/0/temperature/0",
+                "IsHidden": false,
+                "Name": "GPU Core"
+              }
+            }
+          ]
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/lpc/nct6687dr/fan/1"
+        },
+        "SelectedStart": 38,
+        "SelectedStop": 26,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 10,
+        "SelectedCommandStepDown": 3,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [20, 0, false],
+          [30, 303, false],
+          [40, 470, false],
+          [50, 634, false],
+          [60, 768, false],
+          [70, 908, false],
+          [80, 1049, false],
+          [90, 1169, false],
+          [100, 1312, false]
+        ]
+      },
+      {
+        "NickName": "Chipset Fan",
+        "Identifier": "/lpc/nct6687dr/control/2",
+        "IsHidden": true,
+        "Enable": false,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": null,
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": []
+      },
+      {
+        "NickName": "System Fan #1",
+        "Identifier": "/lpc/nct6687dr/control/10",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "Sys1_Front3_Mix",
+          "Identifier": "Mix/Mix",
+          "SelectedMixFunction": 1,
+          "SelectedFanCurves": [
+            {
+              "Name": "Sys1_CPU_Component",
+              "OneWayHysteresis": true,
+              "Points": [
+                "35,0",
+                "40,0",
+                "48,18",
+                "55,35",
+                "61,50",
+                "67,66",
+                "73,82",
+                "79,95",
+                "84,100"
+              ],
+              "SelectedHysteresis": 3,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 35.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 3,
+              "SelectedTempSource": {
+                "Identifier": "/amdcpu/0/temperature/2",
+                "IsHidden": false,
+                "Name": "Core (Tctl/Tdie)"
+              }
+            },
+            {
+              "Name": "Sys1_GPU_Component",
+              "OneWayHysteresis": true,
+              "Points": [
+                "35,0",
+                "45,0",
+                "55,12",
+                "62,25",
+                "68,40",
+                "74,55",
+                "80,72",
+                "86,90"
+              ],
+              "SelectedHysteresis": 3,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 35.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 3,
+              "SelectedTempSource": {
+                "Identifier": "/gpu-nvidia/0/temperature/0",
+                "IsHidden": false,
+                "Name": "GPU Core"
+              }
+            }
+          ]
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/lpc/nct6687dr/fan/10"
+        },
+        "SelectedStart": 22,
+        "SelectedStop": 16,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 10,
+        "SelectedCommandStepDown": 3,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [10, 0, false],
+          [20, 340, false],
+          [30, 502, false],
+          [40, 651, false],
+          [50, 782, false],
+          [60, 912, false],
+          [70, 1029, false],
+          [80, 1126, false],
+          [90, 1234, false],
+          [100, 1345, false]
+        ]
+      },
+      {
+        "NickName": "(Sys #2)",
+        "Identifier": "/lpc/nct6687dr/control/11",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "Sys2_Top1_Mix",
+          "Identifier": "Mix/Mix",
+          "SelectedMixFunction": 1,
+          "SelectedFanCurves": [
+            {
+              "Name": "Sys2_CPU_Component",
+              "OneWayHysteresis": true,
+              "Points": [
+                "35,0",
+                "40,0",
+                "50,22",
+                "57,40",
+                "63,56",
+                "69,72",
+                "75,86",
+                "81,100"
+              ],
+              "SelectedHysteresis": 3,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 35.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 3,
+              "SelectedTempSource": {
+                "Identifier": "/amdcpu/0/temperature/2",
+                "IsHidden": false,
+                "Name": "Core (Tctl/Tdie)"
+              }
+            },
+            {
+              "Name": "Sys2_GPU_Component",
+              "OneWayHysteresis": true,
+              "Points": [
+                "35,0",
+                "45,0",
+                "55,15",
+                "62,30",
+                "68,46",
+                "74,62",
+                "80,80",
+                "86,95"
+              ],
+              "SelectedHysteresis": 3,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 35.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 3,
+              "SelectedTempSource": {
+                "Identifier": "/gpu-nvidia/0/temperature/0",
+                "IsHidden": false,
+                "Name": "GPU Core"
+              }
+            }
+          ]
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/lpc/nct6687dr/fan/11"
+        },
+        "SelectedStart": 32,
+        "SelectedStop": 26,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 10,
+        "SelectedCommandStepDown": 3,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [20, 0, false],
+          [30, 310, false],
+          [40, 483, false],
+          [50, 617, false],
+          [60, 766, false],
+          [70, 884, false],
+          [80, 1023, false],
+          [90, 1116, false],
+          [100, 1221, false]
+        ]
+      },
+      {
+        "NickName": "System Fan #3",
+        "Identifier": "/lpc/nct6687dr/control/12",
+        "IsHidden": true,
+        "Enable": false,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": null,
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": []
+      },
+      {
+        "NickName": "System Fan #4",
+        "Identifier": "/lpc/nct6687dr/control/13",
+        "IsHidden": true,
+        "Enable": false,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": null,
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": []
+      },
+      {
+        "NickName": "System Fan #5",
+        "Identifier": "/lpc/nct6687dr/control/14",
+        "IsHidden": true,
+        "Enable": false,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": null,
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": []
+      },
+      {
+        "NickName": "System Fan #6",
+        "Identifier": "/lpc/nct6687dr/control/15",
+        "IsHidden": true,
+        "Enable": false,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": null,
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": []
+      },
+      {
+        "NickName": "EZ-Connect Fan",
+        "Identifier": "/lpc/nct6687dr/control/3",
+        "IsHidden": true,
+        "Enable": false,
+        "SelectedFanCurve": null,
+        "SelectedOffset": 0,
+        "PairedFanSensor": null,
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 8,
+        "SelectedCommandStepDown": 8,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": []
+      },
+      {
+        "NickName": "GPU Fan 1",
+        "Identifier": "/gpu-nvidia/0/control/1",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "GPU_Fan1_Mix",
+          "Identifier": "Mix/Mix",
+          "SelectedMixFunction": 1,
+          "SelectedFanCurves": [
+            {
+              "Name": "GPU_Core_Curve",
+              "OneWayHysteresis": true,
+              "Points": [
+                "35,0",
+                "45,0",
+                "52,25",
+                "58,35",
+                "64,48",
+                "70,62",
+                "76,78",
+                "82,92",
+                "86,100"
+              ],
+              "SelectedHysteresis": 3,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 35.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 2,
+              "SelectedTempSource": {
+                "Identifier": "/gpu-nvidia/0/temperature/0",
+                "IsHidden": false,
+                "Name": "GPU Core"
+              }
+            },
+            {
+              "Name": "GPU_Hotspot_Safety",
+              "OneWayHysteresis": true,
+              "Points": [
+                "40,0",
+                "60,0",
+                "70,30",
+                "78,55",
+                "85,90",
+                "90,100"
+              ],
+              "SelectedHysteresis": 2,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 40.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 1,
+              "SelectedTempSource": {
+                "Identifier": "/gpu-nvidia/0/temperature/2",
+                "IsHidden": false,
+                "Name": "GPU Hot Spot"
+              }
+            }
+          ]
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/gpu-nvidia/0/fan/1"
+        },
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 50,
+        "SelectedCommandStepDown": 5,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [0, 994, false],
+          [1, 994, false],
+          [10, 994, false],
+          [20, 994, false],
+          [30, 994, false],
+          [40, 1283, false],
+          [50, 1570, false],
+          [60, 1862, false],
+          [70, 2146, false],
+          [80, 2436, false],
+          [90, 2732, false],
+          [100, 2994, false]
+        ]
+      },
+      {
+        "NickName": "GPU Fan 2",
+        "Identifier": "/gpu-nvidia/0/control/2",
+        "IsHidden": false,
+        "Enable": true,
+        "SelectedFanCurve": {
+          "Name": "GPU_Fan2_Mix",
+          "Identifier": "Mix/Mix",
+          "SelectedMixFunction": 1,
+          "SelectedFanCurves": [
+            {
+              "Name": "GPU_Core_Curve",
+              "OneWayHysteresis": true,
+              "Points": [
+                "35,0",
+                "45,0",
+                "52,25",
+                "58,35",
+                "64,48",
+                "70,62",
+                "76,78",
+                "82,92",
+                "86,100"
+              ],
+              "SelectedHysteresis": 3,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 35.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 2,
+              "SelectedTempSource": {
+                "Identifier": "/gpu-nvidia/0/temperature/0",
+                "IsHidden": false,
+                "Name": "GPU Core"
+              }
+            },
+            {
+              "Name": "GPU_Hotspot_Safety",
+              "OneWayHysteresis": true,
+              "Points": [
+                "40,0",
+                "60,0",
+                "70,30",
+                "78,55",
+                "85,90",
+                "90,100"
+              ],
+              "SelectedHysteresis": 2,
+              "SelectedIndex": 0,
+              "SelectedIndexTemp": 40.0,
+              "SelectedIndexValue": 0.0,
+              "SelectedResponseTime": 1,
+              "SelectedTempSource": {
+                "Identifier": "/gpu-nvidia/0/temperature/2",
+                "IsHidden": false,
+                "Name": "GPU Hot Spot"
+              }
+            }
+          ]
+        },
+        "SelectedOffset": 0,
+        "PairedFanSensor": {
+          "Identifier": "/gpu-nvidia/0/fan/2"
+        },
+        "SelectedStart": 0,
+        "SelectedStop": 0,
+        "MinimumPercent": 0,
+        "SelectedCommandStepUp": 50,
+        "SelectedCommandStepDown": 5,
+        "ManualControlValue": 50,
+        "ManualControl": false,
+        "ForceApply": false,
+        "Calibration": [
+          [0, 993, false],
+          [1, 993, false],
+          [10, 993, false],
+          [20, 993, false],
+          [30, 993, false],
+          [40, 1283, false],
+          [50, 1572, false],
+          [60, 1864, false],
+          [70, 2152, false],
+          [80, 2440, false],
+          [90, 2732, false],
+          [100, 2986, false]
+        ]
+      }
+    ],
+    "CustomSensors": [],
+    "FanCurves": [
+      {
+        "Name": "Flat",
+        "IsHidden": false,
+        "CommandMode": 0,
+        "Percent": 50
+      }
+    ],
+    "FanSensors": [
+      {
+        "Identifier": "/lpc/nct6687dr/fan/0",
+        "IsHidden": false,
+        "NickName": "CPU Fan"
+      },
+      {
+        "Identifier": "/lpc/nct6687dr/fan/1",
+        "IsHidden": false,
+        "NickName": "Pump Fan #1"
+      },
+      {
+        "Identifier": "/lpc/nct6687dr/fan/2",
+        "IsHidden": false,
+        "NickName": "Chipset Fan"
+      },
+      {
+        "Identifier": "/lpc/nct6687dr/fan/10",
+        "IsHidden": false,
+        "NickName": "System Fan #1"
+      },
+      {
+        "Identifier": "/lpc/nct6687dr/fan/11",
+        "IsHidden": false,
+        "NickName": "System Fan #2"
+      },
+      {
+        "Identifier": "/lpc/nct6687dr/fan/12",
+        "IsHidden": false,
+        "NickName": "System Fan #3"
+      },
+      {
+        "Identifier": "/lpc/nct6687dr/fan/13",
+        "IsHidden": false,
+        "NickName": "System Fan #4"
+      },
+      {
+        "Identifier": "/lpc/nct6687dr/fan/14",
+        "IsHidden": false,
+        "NickName": "System Fan #5"
+      },
+      {
+        "Identifier": "/lpc/nct6687dr/fan/15",
+        "IsHidden": false,
+        "NickName": "System Fan #6"
+      },
+      {
+        "Identifier": "/lpc/nct6687dr/fan/3",
+        "IsHidden": false,
+        "NickName": "EZ-Connect Fan"
+      },
+      {
+        "Identifier": "/gpu-nvidia/0/fan/1",
+        "IsHidden": false,
+        "NickName": "GPU Fan 1"
+      },
+      {
+        "Identifier": "/gpu-nvidia/0/fan/2",
+        "IsHidden": false,
+        "NickName": "GPU Fan 2"
+      }
+    ],
+    "TemperatureSensors": []
+  },
+  "Sensors": {
+    "AdlxWrapperSettings": {
+      "Enabled": true
+    },
+    "DisabledPlugins": [],
+    "DisableStorageSensors": true,
+    "LibreHardwareMonitorSettings": {
+      "Controller": true,
+      "CPU": true,
+      "EmbeddedEC": false,
+      "GPU": true,
+      "Memory": false,
+      "Motherboard": true,
+      "PowerMonitor": true,
+      "PSU": true,
+      "Storage": false,
+      "StorageUpdateInterval": "00:01:00",
+      "ZeroRPMOverride": false
+    },
+    "NvAPIWrapperSettings": {
+      "Enabled": false,
+      "ZeroRPMOverride": false
+    }
+  },
+  "MainWindow": {
+    "Fahrenheit": false,
+    "HideCalibration": false,
+    "HideFanSpeedCards": true,
+    "HorizontalUIOrientation": false,
+    "PrimaryColor": "#FF607D8B",
+    "SecondaryColor": "#FFAEEA00",
+    "SelectedTheme": "",
+    "ShowHiddenCards": false,
+    "SyncThemeWithWindows": true,
+    "SyncTrayIconColorWithWindows": true,
+    "TrayIconColor": null,
+    "TrayIcons": []
+  }
+}
