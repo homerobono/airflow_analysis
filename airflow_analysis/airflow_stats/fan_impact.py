@@ -62,8 +62,6 @@ _TARGET_KEYS: list[str] = [
     "gpu_mem_junction",
     "vrm",
     "chipset",
-    "dimm1",
-    "dimm3",
     "system",
 ]
 
@@ -74,8 +72,6 @@ _TARGET_LABELS: dict[str, str] = {
     "gpu_mem_junction": "GPU Mem Junction",
     "vrm": "VRM MOS",
     "chipset": "Chipset",
-    "dimm1": "DIMM #1",
-    "dimm3": "DIMM #3",
     "system": "System (motherboard)",
 }
 
@@ -226,7 +222,7 @@ def _ols_with_diagnostics(
 
 
 def _fan_label(data: ConfigData, fan_col: str) -> str:
-    return data.labels.get(fan_col, fan_col) or fan_col
+    return data.slot_label(fan_col) or fan_col
 
 
 def compute_fan_impact(

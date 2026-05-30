@@ -83,7 +83,6 @@ class SensorSchema:
             *self.mb_temps,
             *self.cpu_temps,
             *self.gpu_temps,
-            *self.ram_temps,
             *self.storage_temps,
         ]
 
@@ -158,8 +157,6 @@ _HOTSPOT_HINTS: dict[str, list[str]] = {
     "system": ["system"],
     "vrm": ["vrm mos", "vrm"],
     "chipset": ["chipset"],
-    "dimm1": ["dimm #1"],
-    "dimm3": ["dimm #3"],
 }
 
 _LOAD_HINTS: dict[str, list[str]] = {
@@ -206,8 +203,6 @@ def primary_temps(
         "system": schema.mb_temps,
         "vrm": schema.mb_temps,
         "chipset": schema.mb_temps,
-        "dimm1": schema.ram_temps,
-        "dimm3": schema.ram_temps,
     }
     for key, hints in _HOTSPOT_HINTS.items():
         pick = _pick_by_label(df, labels, pools[key], hints)

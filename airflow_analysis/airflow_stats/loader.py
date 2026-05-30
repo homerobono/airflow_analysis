@@ -42,6 +42,21 @@ class ConfigData:
     def label(self, sensor_path: str) -> str:
         return self.labels.get(sensor_path, sensor_path)
 
+    def slot_label(self, sensor_path: str) -> str:
+        """Return the physical slot name (e.g. ``FRONT_3``) for a fan sensor
+        when ``setup.md`` provides a ``fan_map``; otherwise the friendly LHM
+        label (e.g. ``"Pump Fan #1"``).
+
+        The map is keyed by the friendly header label exactly as it appears in
+        ``setup.md`` (e.g. ``"Pump Fan #1"`` or ``"System Fan #1"``).
+        """
+        friendly = self.labels.get(sensor_path, sensor_path)
+        slot = self.setup.fan_map.get(friendly) if self.setup else None
+        if not slot:
+            return friendly
+        # Show both so the reader doesn't have to cross-reference setup.md.
+        return f"{slot} ({friendly})"
+
 
 def _read_one_csv(path: Path) -> tuple[pd.DataFrame, dict[str, str]] | None:
     """Read a single LHM CSV.

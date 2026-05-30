@@ -38,7 +38,6 @@ _HOTSPOT_DISPLAY_ORDER = [
     "cpu_pkg", "cpu_ccd1",
     "gpu_core", "gpu_hotspot", "gpu_mem_junction",
     "vrm", "chipset", "system",
-    "dimm1", "dimm3",
 ]
 
 
@@ -141,7 +140,7 @@ def _fan_efficiency(
                         "config": name,
                         "hotspot": hot_key,
                         "fan": fan,
-                        "fan_label": data.label(fan),
+                        "fan_label": data.slot_label(fan),
                         "slope_C_per_RPM": float(slope),
                         "slope_C_per_1000_RPM": float(slope) * 1000.0,
                         "pearson_r": r,

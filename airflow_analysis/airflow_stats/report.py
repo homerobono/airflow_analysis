@@ -14,6 +14,7 @@ from .compare import ComparisonResult
 from .cooling import (
     CoolingKPIs,
     compute_cooling_kpis,
+    compute_score_variants,
     kpis_to_detail_rows,
     kpis_to_summary_rows,
     rank_configs,
@@ -58,7 +59,6 @@ def _summary_html(stats: PerConfigStats, data: ConfigData) -> str:
     key_paths = (
         list(stats.primary_temps.values())
         + schema.mb_temps
-        + schema.ram_temps
         + schema.storage_temps
         + schema.fans_rpm()
         + list(stats.primary_loads.values())
@@ -68,7 +68,7 @@ def _summary_html(stats: PerConfigStats, data: ConfigData) -> str:
         return "<p class='meta'>No headline sensors detected.</p>"
     sub = df.loc[key_paths].copy()
     sub = sub.reset_index(drop=False).rename(columns={"index": "sensor"})
-    sub["sensor"] = sub["sensor"].apply(lambda s: data.label(s) or s)
+    sub["sensor"] = sub["sensor"].apply(lambda s: data.slot_label(s) or s)
     sub = sub.drop(columns=["label"], errors="ignore")
     return sub.to_html(
         classes="data",
@@ -95,8 +95,6 @@ def _hotspot_label_map() -> dict[str, str]:
         "vrm": "VRM MOS",
         "chipset": "Chipset",
         "system": "System",
-        "dimm1": "DIMM #1",
-        "dimm3": "DIMM #3",
     }
 
 
@@ -145,24 +143,30 @@ def _per_config_payload(data: ConfigData, stats: PerConfigStats) -> dict:
             data.df[cpu_pkg],
             data.df[cpu_fan],
             x_label=f"{labels.get(cpu_pkg, cpu_pkg)} (C)",
-            y_label=f"{labels.get(cpu_fan, cpu_fan)} (RPM)",
+            y_label=f"{data.slot_label(cpu_fan)} (RPM)",
             title=f"CPU fan curve - Config {data.name}",
         )
         if img:
             fan_curves.append(img)
 
-    # First couple of system fans against GPU hotspot - prefer fans that
-    # actually spin (skip headers whose RPM column is flat zero).
-    sys_fans = [c for c in stats.schema.mb_fans_rpm if "system fan" in (labels.get(c, "") or "").lower()]
+    # First couple of case fans against GPU hotspot - prefer fans that
+    # actually spin (skip headers whose RPM column is flat zero). Include
+    # any fan whose ``setup.md`` mapping puts it in a case slot, plus the
+    # generic System Fan headers as a fallback.
+    case_keywords = ("system fan", "pump fan")  # MSI uses "Pump Fan" for a case header.
+    sys_fans = [
+        c for c in stats.schema.mb_fans_rpm
+        if any(k in (labels.get(c, "") or "").lower() for k in case_keywords)
+    ]
     sys_fans = [c for c in sys_fans if pd.to_numeric(data.df[c], errors="coerce").std() > 0]
-    for fan in sys_fans[:2]:
+    for fan in sys_fans[:3]:
         if gpu_hot:
             img = lowess_scatter(
                 data.df[gpu_hot],
                 data.df[fan],
                 x_label=f"{labels.get(gpu_hot, gpu_hot)} (C)",
-                y_label=f"{labels.get(fan, fan)} (RPM)",
-                title=f"{labels.get(fan, fan)} vs GPU Hot Spot - Config {data.name}",
+                y_label=f"{data.slot_label(fan)} (RPM)",
+                title=f"{data.slot_label(fan)} vs GPU Hot Spot - Config {data.name}",
             )
             if img:
                 fan_curves.append(img)
@@ -337,14 +341,82 @@ def _fmt(value: float, digits: int = 1, suffix: str = "") -> str:
     return f"{f:.{digits}f}{suffix}"
 
 
-def _cooling_payload(kpis: list[CoolingKPIs]) -> dict:
+def _format_variant(name: str, variant_id: str, v: dict) -> dict:
+    """Render-ready dict for one (config, variant) cell in the sensitivity table."""
+    score = v.get("score")
+    score_f = _fmt(score, 1)
+
+    cpu_active = v.get("cpu_active", True)
+    gpu_active = v.get("gpu_active", True)
+
+    if variant_id == "V5":
+        cpu_cov = (
+            _fmt((v.get("cpu_coverage") or 0) * 100.0, 1, "%")
+            if cpu_active else "idle"
+        )
+        gpu_cov = (
+            _fmt((v.get("gpu_coverage") or 0) * 100.0, 1, "%")
+            if gpu_active else "idle"
+        )
+    else:
+        cov = v.get("coverage")
+        cov_f = (
+            _fmt((cov or 0) * 100.0, 1, "%") if cov is not None and cov == cov else "n/a"
+        )
+        cpu_cov = cov_f
+        gpu_cov = cov_f
+
+    return {
+        "config": name,
+        "id": variant_id,
+        "label": v.get("label", variant_id),
+        "gate": v.get("gate", ""),
+        "score": score,
+        "score_fmt": score_f,
+        "temp_score_fmt": _fmt(v.get("temp_score"), 1),
+        "rpm_score_fmt": _fmt(v.get("rpm_score"), 1),
+        "weighted_rise_fmt": _fmt(v.get("weighted_rise"), 2, " C"),
+        "cpu_rise_fmt": _fmt(v.get("cpu_rise"), 1, " C"),
+        "gpu_rise_fmt": _fmt(v.get("gpu_rise"), 1, " C"),
+        "vrm_rise_fmt": _fmt(v.get("vrm_rise"), 1, " C"),
+        "high_total_rpm_fmt": _fmt(v.get("high_total_rpm"), 0, " RPM"),
+        "n_samples": v.get("n_samples", 0),
+        "cpu_coverage_fmt": cpu_cov,
+        "gpu_coverage_fmt": gpu_cov,
+        "cpu_active": cpu_active,
+        "gpu_active": gpu_active,
+    }
+
+
+def _variants_payload(
+    configs: list[tuple[ConfigData, PerConfigStats]],
+) -> list[dict]:
+    """Build the per-config V0..V5 sensitivity table rows."""
+    out: list[dict] = []
+    for data, stats in configs:
+        variants = compute_score_variants(data, stats)
+        cells = {
+            vid: _format_variant(data.name, vid, v) for vid, v in variants.items()
+        }
+        out.append({"name": data.name, "cells": cells})
+    return out
+
+
+def _cooling_payload(
+    kpis: list[CoolingKPIs],
+    configs: list[tuple[ConfigData, PerConfigStats]] | None = None,
+) -> dict:
     """Render-ready bundle of cooling KPIs."""
     if not kpis:
-        return {"summary_rows": [], "detail_rows": [], "ranking": [], "winner": None}
+        return {
+            "summary_rows": [], "detail_rows": [], "ranking": [],
+            "winner": None, "variants": [],
+        }
 
     summary = kpis_to_summary_rows(kpis)
     detail = kpis_to_detail_rows(kpis)
     ranking = rank_configs(kpis)
+    variants = _variants_payload(configs) if configs else []
 
     # Decorate with pre-formatted strings so the template stays trivial.
     for row in summary:
@@ -398,6 +470,8 @@ def _cooling_payload(kpis: list[CoolingKPIs]) -> dict:
         ],
         "winner": winner,
         "multi": multi,
+        "variants": variants,
+        "variant_ids": ["V0", "V1", "V2", "V3", "V4", "V5"],
     }
 
 
@@ -418,7 +492,7 @@ def render_report(
     comp_payload = _comparison_payload(comparison) if comparison and comparison.configs else None
 
     kpis = [compute_cooling_kpis(d, s) for d, s in configs]
-    cooling_payload = _cooling_payload(kpis)
+    cooling_payload = _cooling_payload(kpis, configs)
 
     html = template.render(
         generated_at=_dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

@@ -22,7 +22,7 @@ the fan layout and one or more `LibreHardwareMonitorLog-*.csv` logs), the tool:
 
 - parses the LHM two-row header (sensor path + friendly label) and concatenates
   all CSVs into one tidy per-config DataFrame keyed by sensor path,
-- classifies sensors (motherboard/CPU/GPU/RAM/storage temps, fan RPM, fan duty,
+- classifies sensors (motherboard/CPU/GPU/storage temps, fan RPM, fan duty,
   loads, power),
 - computes summary statistics, Spearman + Pearson correlations, load-binned
   conditional medians, and lagged load->temperature cross-correlations,

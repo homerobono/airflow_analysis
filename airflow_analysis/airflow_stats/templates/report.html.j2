@@ -89,7 +89,11 @@
     {% for row in cooling.summary_rows %}
       {% set is_winner = cooling.winner == row.name %}
       <div class="kpi-card {% if is_winner %}winner{% endif %}">
-        <div class="label">Config {{ row.name }} &middot; Cooling Score</div>
+        <div class="label">Config {{ row.name }} &middot; Cooling Score
+          {% if not row.cooling_score_is_v5 %}
+            <span class="tag" title="V5 matched-quantile gating could not score this capture (likely too short or too idle); falling back to legacy V0 formula. Not directly comparable to other V5 scores.">V0 fallback</span>
+          {% endif %}
+        </div>
         <div class="value">{{ row.fmt.cooling_score }} / 100</div>
         <div class="sub">
           CPU rise {{ row.fmt.cpu_rise }} &middot;
@@ -224,37 +228,159 @@
   </details>
 
   <ul class="kpi-legend">
-    <li><strong>Cooling score (0..100, higher is better):</strong>
-        70% temperature rise over ambient (under high load) + 30% total
-        fan RPM (under high load). Inside the temperature term: CPU 40
-        points, GPU 30 points, VRM 10 points (CPU outweighs GPU by 10,
-        VRM is the tiebreaker). Anchors: 0 C adjusted rise &rarr; 100,
-        40 C &rarr; 0; 0 RPM &rarr; 100, 8000 RPM &rarr; 0.</li>
-    <li><strong>Workload-intensity compensation:</strong> the score forgives
-        up to 10 C of extra hotspot rise proportional to the workload
-        intensity (clocks, voltages, power under load). A pegged-out system
-        is genuinely producing more heat &mdash; that's not the airflow's
-        fault &mdash; so it gets a credit. An idle/light run gets no credit
-        and its temps must speak for themselves.</li>
+    <li><strong>Cooling score (V5, 0..100, higher is better):</strong>
+        80% temperature rise over ambient + 20% total fan RPM. Inside the
+        temperature term: CPU 0.55, GPU 0.30, VRM 0.15 (CPU dominates because
+        a sub-optimal CPU heatsink is the typical airflow bottleneck).
+        Anchors: 0&nbsp;C rise &rarr; 100, 40&nbsp;C &rarr; 0;
+        0&nbsp;RPM &rarr; 100, 8000&nbsp;RPM &rarr; 0.</li>
+    <li><strong>Matched-quantile gate:</strong> the score only looks at each
+        config's <em>own</em> top 30% busiest CPU samples (for CPU rise) and
+        top 30% busiest GPU samples (for GPU rise). Each capture is judged on
+        its own busiest moments, so two configs measured under different
+        workloads still get an apples-to-apples comparison.</li>
+    <li><strong>Idle-component drop:</strong> if a component's
+        70th-percentile load is &lt; 5% (effectively idle for the whole
+        capture), V5 removes that component from the temperature term and
+        renormalizes the remaining weights. This stops a config that
+        happened to be GPU-idle from getting a free "0 GPU rise" credit.</li>
     <li><strong>Workload intensity (0..100):</strong> mean of CPU and GPU
         sub-scores. Each sub-score averages clock, voltage and power scaled
         against typical desktop maxima (CPU: 5.0 GHz, 0.9&ndash;1.4 V, 150 W;
-        GPU: 3.0 GHz, 0.7&ndash;1.1 V, 350 W). 100 means the silicon was
-        running flat out during the load samples.</li>
+        GPU: 3.0 GHz, 0.7&ndash;1.1 V, 350 W). Reported for context; V5 does
+        NOT use this for compensation (matched-quantile gating handles
+        cross-capture fairness on its own).</li>
     <li><strong>Rise over ambient (C):</strong> hotspot median minus the
         motherboard "System" sensor. Cancels out room-temperature differences
         between sessions.</li>
     <li><strong>Cooling efficiency (C/W):</strong> rise over ambient divided
         by that component's median power draw while loaded. Lower = the
         cooler removes more heat per watt produced.</li>
-    <li><strong>High load:</strong> samples where CPU load &ge; 10%
-        <em>or</em> GPU load &ge; 30%. The CPU gate is intentionally low
-        because a powerful CPU heats up even at light loads; the GPU gate
-        is higher because GPUs stay cool until they're actively rendering.</li>
+    <li><strong>High load (used by KPI tables, not by V5):</strong> samples
+        where CPU load &ge; 10% <em>or</em> GPU load &ge; 30%. The CPU gate
+        is intentionally low because a powerful CPU heats up even at light
+        loads; the GPU gate is higher because GPUs stay cool until they're
+        actively rendering. The per-hotspot KPI tables below still use this
+        gate so their numbers stay stable across releases; only the headline
+        cooling score uses V5's matched-quantile gate.</li>
     <li><strong>Headroom to throttle (C):</strong> distance from the 95th
         percentile temperature to the throttling threshold
         (CPU 95 C, GPU hot spot 90 C, VRM 100 C). Bigger = safer.</li>
   </ul>
+</section>
+{% endif %}
+
+{% if cooling and cooling.variants %}
+<section class="kpi-section">
+  <details>
+    <summary><strong>Score sensitivity (V0&ndash;V5 variants)</strong> &mdash;
+      how the score moves under different "high resource utilization"
+      definitions</summary>
+    <p class="meta" style="margin-top: 8px;">
+      <strong>V5</strong> is the production score shown above. The other
+      variants are listed for transparency: each redefines what counts as
+      "high load" and shows how that choice moves the ranking. If V5 and the
+      other variants disagree, the disagreement itself is the signal &mdash;
+      it tells you which captures aren't directly comparable.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th class="first lbl">Config</th>
+          {% for vid in cooling.variant_ids %}
+            <th>{{ vid }}{% if vid == 'V5' %} (production){% elif vid == 'V4' %}*{% endif %}</th>
+          {% endfor %}
+          <th>V5 CPU mask</th>
+          <th>V5 GPU mask</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cooling.variants %}
+          <tr {% if cooling.winner == row.name %}class="winner-row"{% endif %}>
+            <td class="first lbl"><strong>Config {{ row.name }}</strong></td>
+            {% for vid in cooling.variant_ids %}
+              <td>{{ row.cells[vid].score_fmt }}</td>
+            {% endfor %}
+            <td>{{ row.cells['V5'].cpu_coverage_fmt }}</td>
+            <td>{{ row.cells['V5'].gpu_coverage_fmt }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <details style="margin-top: 8px;">
+      <summary>Per-variant sub-scores (CPU/GPU/VRM rise, fan RPM)</summary>
+      <table>
+        <thead>
+          <tr>
+            <th class="first lbl">Config</th>
+            <th>Variant</th>
+            <th>Score</th>
+            <th>Temp term</th>
+            <th>RPM term</th>
+            <th>Weighted rise</th>
+            <th>CPU rise</th>
+            <th>GPU rise</th>
+            <th>VRM rise</th>
+            <th>Total fan RPM</th>
+            <th>n samples</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in cooling.variants %}
+            {% for vid in cooling.variant_ids %}
+              {% set v = row.cells[vid] %}
+              <tr>
+                {% if loop.first %}
+                  <td class="first lbl" rowspan="{{ cooling.variant_ids|length }}">
+                    <strong>Config {{ row.name }}</strong>
+                  </td>
+                {% endif %}
+                <td class="lbl">{{ v.label }}</td>
+                <td>{{ v.score_fmt }}</td>
+                <td>{{ v.temp_score_fmt }}</td>
+                <td>{{ v.rpm_score_fmt }}</td>
+                <td>{{ v.weighted_rise_fmt }}</td>
+                <td>{{ v.cpu_rise_fmt }}</td>
+                <td>{{ v.gpu_rise_fmt }}</td>
+                <td>{{ v.vrm_rise_fmt }}</td>
+                <td>{{ v.high_total_rpm_fmt }}</td>
+                <td>{{ "{:,}".format(v.n_samples) }}</td>
+              </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+
+    <ul class="kpi-legend">
+      <li><strong>V0 legacy:</strong> pre-V5 production formula (temp 0.70 +
+          rpm 0.30, weights cpu 4/7 / gpu 3/7 / vrm 1/7, current absolute gate
+          [CPU&ge;10% or GPU&ge;30%], with -10&nbsp;C&times;intensity
+          forgiveness). Shown so you can see how V5 reranks the same data.</li>
+      <li><strong>V1 tight:</strong> tight load gate (CPU&ge;70% or
+          GPU&ge;70%); legacy weights and forgiveness. If a config has very
+          few samples in this range, the score is unreliable &mdash; check the
+          n column.</li>
+      <li><strong>V2 intensity:</strong> samples where the per-sample workload
+          intensity (clock/Vcore/W blend) &ge; 0.7; legacy weights and
+          forgiveness. Useful when CPU and GPU loads disagree about how busy
+          the system actually is.</li>
+      <li><strong>V3 no-forgive:</strong> current gate, legacy weights, but
+          workload-intensity forgiveness removed. Shows what V0 would say if
+          it didn't credit configs for being measured under heavy work.</li>
+      <li><strong>V4 intensity*:</strong> WorkloadIntensity score itself
+          (clocks/Vcore/W blend, 0..100). <em>Not</em> a cooling score &mdash;
+          listed to confirm captures are under similar silicon pressure
+          (similar V4 across configs = comparison is fair).</li>
+      <li><strong>V5 production:</strong> per-component matched-quantile
+          masks (top 30% of own samples), weights cpu=0.55 / gpu=0.30 /
+          vrm=0.15 (temp=0.80 / rpm=0.20). Components whose 70th-percentile
+          load is &lt; 5% are dropped from the temp term ("idle" in the V5
+          mask columns). Best for ranking captures with different workload
+          distributions.</li>
+    </ul>
+  </details>
 </section>
 {% endif %}
 

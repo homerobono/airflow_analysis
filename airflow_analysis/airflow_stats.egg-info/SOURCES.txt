@@ -4,6 +4,8 @@ airflow_stats/__init__.py
 airflow_stats/__main__.py
 airflow_stats/cli.py
 airflow_stats/compare.py
+airflow_stats/cooling.py
+airflow_stats/fan_impact.py
 airflow_stats/loader.py
 airflow_stats/plotting.py
 airflow_stats/report.py

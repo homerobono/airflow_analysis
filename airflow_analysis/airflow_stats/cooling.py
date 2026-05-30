@@ -16,9 +16,16 @@ Key per-config metrics
   throttling threshold (CPU 95 C, GPU hot spot 90 C, VRM 100 C).
 * ``acoustic_cost``: median of the sum of all fan RPMs under high load,
   a proxy for noise. Cooling that needs less RPM is "better airflow".
-* ``cooling_score``: composite score combining temperature rise over ambient
-  with acoustic cost, normalized to [0, 100] where higher = cooler per
-  resource & per RPM. Used to rank configs.
+* ``cooling_score``: V5 composite. Per-component matched-quantile masks
+  (each config scored on its own top-30% busiest CPU samples for CPU rise,
+  top-30% busiest GPU samples for GPU rise, union for VRM and fan RPM),
+  goal-aligned weights (cpu=0.55, gpu=0.30, vrm=0.15 in the temp budget;
+  temp=0.80, rpm=0.20 in the composite), idle-component drop (a component
+  whose 70th-percentile load is < 5% is removed from the temp term and the
+  remaining weights renormalized). Higher = cooler / quieter for the
+  things that matter, fairly compared across captures with different
+  workload distributions. ``compute_score_variants`` exposes V0..V4 too,
+  for transparency in the report.
 """
 
 from __future__ import annotations
@@ -50,6 +57,22 @@ _HIGH_LOAD_PCT_CPU = 10.0
 _HIGH_LOAD_PCT_GPU = 30.0
 # Backwards-compatible default used when the caller doesn't specify a target.
 _HIGH_LOAD_PCT = _HIGH_LOAD_PCT_CPU
+
+# ----- V5 production score parameters ----------------------------------------
+# V5 scores each config against its OWN busiest moments per component, rather
+# than against an absolute load threshold, so captures with different workload
+# distributions still get an apples-to-apples comparison.
+_V5_QUANTILE = 0.30          # top 30% of loaded samples per component, per config
+_V5_MIN_LOAD_FLOOR = 5.0     # if the (1-q)-percentile load is below this %,
+                             # treat the component as idle for this capture
+_V5_CPU_W = 0.55             # CPU weight in the temperature budget
+_V5_GPU_W = 0.30             # GPU weight
+_V5_VRM_W = 0.15             # VRM weight
+_V5_TEMP_W = 0.80            # temperature term weight in composite
+_V5_RPM_W = 0.20             # fan-RPM term weight in composite
+
+# Workload-intensity normalization anchors used by V2 (intensity gate).
+_V2_INTENSITY_THRESHOLD = 0.7
 
 # Mapping hotspot key -> (load_key, power_keyword) used to compute C/W.
 _HOTSPOT_POWER_HINTS: dict[str, tuple[str, list[str]]] = {
@@ -104,6 +127,8 @@ class CoolingKPIs:
     median_total_fan_rpm: float          # sum of all fan RPMs, median
     high_load_total_fan_rpm: float       # same, restricted to high-load
     cooling_score: float                 # 0..100, higher = cooler per resource
+    cooling_score_is_v5: bool = True     # False when we fell back to V0 (capture
+                                         # too idle for matched-quantile gating)
     workload: WorkloadIntensity | None = None
     hotspots: list[HotspotKPI] = field(default_factory=list)
 
@@ -373,6 +398,435 @@ def _compute_workload_intensity(
     )
 
 
+# ---------- score variants (V0 legacy + V1..V5) ------------------------------
+#
+# V5 is the production cooling_score. V0..V4 are exposed via
+# ``compute_score_variants`` for transparency in the report - so the user can
+# see how the score moves under different "high resource utilization"
+# definitions. The single-source-of-truth for variant logic lives here so the
+# report and the standalone debug script (scripts/score_variants.py) agree.
+
+
+def _per_sample_intensity_mask(
+    data: ConfigData, stats: PerConfigStats, threshold: float = _V2_INTENSITY_THRESHOLD
+) -> pd.Series:
+    """V2 mask: samples where max(CPU, GPU) per-sample workload intensity >= threshold.
+
+    Mirrors ``_compute_workload_intensity`` column-pick logic but works
+    row-wise instead of taking medians under an existing mask.
+    """
+    schema = stats.schema
+
+    cpu_clock_col = _pick_first_label_match(
+        data, schema.cpu_clocks,
+        ["cores (average)", "core (average)", "cpu cores", "core #1"],
+    )
+    cpu_vcore_col = _pick_first_label_match(
+        data, schema.cpu_voltages, ["vcore", "core voltage", "cpu core"],
+    )
+    if cpu_vcore_col is None:
+        cpu_vcore_col = _pick_first_label_match(
+            data, schema.mb_voltages, ["vcore", "cpu vcore", "cpu core"],
+        )
+    if cpu_vcore_col is None and schema.cpu_voltages:
+        vid_cols = [
+            c for c in schema.cpu_voltages
+            if "vid" in (data.labels.get(c, "") or "").lower()
+        ]
+        if vid_cols:
+            cpu_vcore_col = vid_cols[0]
+    cpu_pkg_power_col = _pick_first_label_match(
+        data, schema.cpu_power, ["package", "cpu package", "cpu pkg"],
+    )
+    gpu_clock_col = _pick_first_label_match(
+        data, schema.gpu_clocks, ["gpu core", "gpu clock", "core"],
+    )
+    gpu_voltage_col = _pick_first_label_match(
+        data, schema.gpu_voltages, ["gpu core", "core"],
+    )
+    gpu_power_col = _pick_first_label_match(
+        data, schema.gpu_power, ["package", "gpu power", "board", "total"],
+    )
+
+    df = data.df
+    idx = df.index
+
+    def _norm_col(col: str | None, lo: float, hi: float) -> pd.Series:
+        if col is None or col not in df.columns:
+            return pd.Series(np.nan, index=idx)
+        if hi <= lo:
+            return pd.Series(np.nan, index=idx)
+        x = (pd.to_numeric(df[col], errors="coerce") - lo) / (hi - lo)
+        return x.clip(lower=0.0, upper=1.0)
+
+    cpu_parts = pd.concat(
+        [
+            _norm_col(cpu_clock_col, 0.0, _CPU_CLOCK_MAX_MHZ),
+            _norm_col(cpu_vcore_col, _CPU_VCORE_LO_V, _CPU_VCORE_HI_V),
+            _norm_col(cpu_pkg_power_col, 0.0, _CPU_PKG_MAX_W),
+        ],
+        axis=1,
+    )
+    gpu_parts = pd.concat(
+        [
+            _norm_col(gpu_clock_col, 0.0, _GPU_CLOCK_MAX_MHZ),
+            _norm_col(gpu_voltage_col, _GPU_VOLTAGE_LO_V, _GPU_VOLTAGE_HI_V),
+            _norm_col(gpu_power_col, 0.0, _GPU_PKG_MAX_W),
+        ],
+        axis=1,
+    )
+
+    cpu_intensity = cpu_parts.mean(axis=1, skipna=True)
+    gpu_intensity = gpu_parts.mean(axis=1, skipna=True)
+    combined = pd.concat([cpu_intensity, gpu_intensity], axis=1).max(axis=1, skipna=True)
+    return combined.fillna(0.0) >= threshold
+
+
+def _per_component_quantile_masks(
+    data: ConfigData, stats: PerConfigStats, q: float = _V5_QUANTILE
+) -> dict[str, pd.Series | None]:
+    """V5 masks: per-component matched-quantile boolean masks.
+
+    Returns ``{"cpu": cpu_mask | None, "gpu": gpu_mask | None,
+    "vrmfan": union | None}``. A component is None when its
+    (1-q)-percentile load is below ``_V5_MIN_LOAD_FLOOR`` percent (idle), so
+    the score correctly drops that component instead of admitting every
+    sample.
+    """
+    df = data.df
+    idx = df.index
+
+    def _top_q(col: str | None) -> pd.Series | None:
+        if col is None or col not in df.columns:
+            return None
+        s = pd.to_numeric(df[col], errors="coerce")
+        valid = s.dropna()
+        if valid.empty:
+            return None
+        threshold = float(valid.quantile(1.0 - q))
+        if threshold < _V5_MIN_LOAD_FLOOR:
+            return None
+        return (s >= threshold).fillna(False)
+
+    cpu_mask = _top_q(stats.primary_loads.get("cpu_total"))
+    gpu_mask = _top_q(stats.primary_loads.get("gpu_core"))
+    if cpu_mask is not None and gpu_mask is not None:
+        vrmfan_mask = cpu_mask | gpu_mask
+    elif cpu_mask is not None:
+        vrmfan_mask = cpu_mask
+    elif gpu_mask is not None:
+        vrmfan_mask = gpu_mask
+    else:
+        vrmfan_mask = None
+    return {"cpu": cpu_mask, "gpu": gpu_mask, "vrmfan": vrmfan_mask}
+
+
+def _median_df_under_mask(
+    df: pd.DataFrame, col: str | None, mask: pd.Series | None
+) -> float:
+    """DataFrame-keyed counterpart to ``_median_under_mask`` (which takes ConfigData)."""
+    if col is None or col not in df.columns:
+        return float("nan")
+    s = pd.to_numeric(df[col], errors="coerce")
+    if mask is not None:
+        s = s.loc[mask]
+    s = s.dropna()
+    return float(s.median()) if not s.empty else float("nan")
+
+
+def _total_fan_rpm_under_mask(
+    data: ConfigData, stats: PerConfigStats, mask: pd.Series | None
+) -> float:
+    fans = [c for c in stats.schema.fans_rpm() if c in data.df.columns]
+    if not fans:
+        return float("nan")
+    sub = data.df[fans].apply(pd.to_numeric, errors="coerce")
+    if mask is not None:
+        sub = sub.loc[mask]
+    if sub.empty:
+        return float("nan")
+    return float(sub.sum(axis=1, skipna=True).median())
+
+
+def _score_v5_full(
+    data: ConfigData, stats: PerConfigStats, ambient_median: float
+) -> dict[str, object]:
+    """Full V5 result dict: score plus diagnostics for the variants table.
+
+    Per-component matched-quantile masks; goal-aligned weights
+    (cpu=0.55 / gpu=0.30 / vrm=0.15 in temp budget; temp=0.80 / rpm=0.20 in
+    composite); no workload-intensity forgiveness; idle components dropped.
+    """
+    masks = _per_component_quantile_masks(data, stats, q=_V5_QUANTILE)
+
+    def _rise(hot_key: str, mask: pd.Series | None) -> float:
+        if mask is None:
+            return float("nan")
+        col = stats.primary_temps.get(hot_key)
+        if col is None or col not in data.df.columns:
+            return float("nan")
+        med = _median_df_under_mask(data.df, col, mask)
+        if np.isnan(med) or np.isnan(ambient_median):
+            return float("nan")
+        return med - ambient_median
+
+    cpu_rise = _rise("cpu_pkg", masks["cpu"])
+    gpu_rise = _rise("gpu_hotspot", masks["gpu"])
+    if np.isnan(gpu_rise):
+        gpu_rise = _rise("gpu_core", masks["gpu"])
+    vrm_rise = _rise("vrm", masks["vrmfan"])
+
+    component_weights = [
+        (cpu_rise, _V5_CPU_W),
+        (gpu_rise, _V5_GPU_W),
+        (vrm_rise, _V5_VRM_W),
+    ]
+    available = [(r, w) for r, w in component_weights if not np.isnan(r)]
+    if available:
+        total_w = sum(w for _, w in available)
+        weighted_rise = sum(r * w for r, w in available) / total_w
+        temp_score = max(0.0, min(100.0, 100.0 - (weighted_rise / 40.0) * 100.0))
+    else:
+        weighted_rise = float("nan")
+        temp_score = float("nan")
+
+    if masks["vrmfan"] is not None:
+        high_total_rpm = _total_fan_rpm_under_mask(data, stats, masks["vrmfan"])
+    else:
+        high_total_rpm = float("nan")
+    if not np.isnan(high_total_rpm):
+        rpm_score = max(0.0, min(100.0, 100.0 - (high_total_rpm / 8000.0) * 100.0))
+    else:
+        rpm_score = float("nan")
+
+    if not np.isnan(temp_score) and not np.isnan(rpm_score):
+        score = _V5_TEMP_W * temp_score + _V5_RPM_W * rpm_score
+    elif not np.isnan(temp_score):
+        score = temp_score
+    else:
+        score = float("nan")
+
+    total = int(len(data.df.index))
+    cpu_n = int(masks["cpu"].sum()) if masks["cpu"] is not None else 0
+    gpu_n = int(masks["gpu"].sum()) if masks["gpu"] is not None else 0
+    vrmfan_n = int(masks["vrmfan"].sum()) if masks["vrmfan"] is not None else 0
+
+    return {
+        "score": score,
+        "temp_score": temp_score,
+        "rpm_score": rpm_score,
+        "weighted_rise": weighted_rise,
+        "cpu_rise": cpu_rise,
+        "gpu_rise": gpu_rise,
+        "vrm_rise": vrm_rise,
+        "high_total_rpm": high_total_rpm,
+        "n_total": total,
+        "cpu_n": cpu_n,
+        "gpu_n": gpu_n,
+        "n_samples": vrmfan_n,
+        "cpu_coverage": (cpu_n / total) if total else 0.0,
+        "gpu_coverage": (gpu_n / total) if total else 0.0,
+        "coverage": (vrmfan_n / total) if total else 0.0,
+        "cpu_active": masks["cpu"] is not None,
+        "gpu_active": masks["gpu"] is not None,
+    }
+
+
+def _score_with_mask(
+    data: ConfigData,
+    stats: PerConfigStats,
+    high_mask: pd.Series,
+    workload_overall: float,
+    *,
+    forgive_intensity: bool,
+    cpu_w: float = 4.0 / 7.0,
+    gpu_w: float = 3.0 / 7.0,
+    vrm_w: float = 1.0 / 7.0,
+    temp_w: float = 0.70,
+    rpm_w: float = 0.30,
+    ambient_median: float | None = None,
+) -> dict[str, object]:
+    """Composite cooling score on an arbitrary high-load mask.
+
+    Used by V0/V1/V2/V3 variants in ``compute_score_variants``. The default
+    weights and ``forgive_intensity=True`` reproduce the legacy V0 formula
+    (production score before V5).
+    """
+    if ambient_median is None:
+        system_col = stats.primary_temps.get("system")
+        ambient_median = (
+            _median_numeric(data.df[system_col])
+            if system_col and system_col in data.df.columns
+            else float("nan")
+        )
+
+    def _rise(hot_key: str) -> float:
+        col = stats.primary_temps.get(hot_key)
+        if col is None or col not in data.df.columns:
+            return float("nan")
+        med = _median_df_under_mask(data.df, col, high_mask)
+        if np.isnan(med) or np.isnan(ambient_median):
+            return float("nan")
+        return med - ambient_median
+
+    cpu_rise = _rise("cpu_pkg")
+    gpu_rise = _rise("gpu_hotspot")
+    if np.isnan(gpu_rise):
+        gpu_rise = _rise("gpu_core")
+    vrm_rise = _rise("vrm")
+
+    component_weights = [
+        (cpu_rise, cpu_w),
+        (gpu_rise, gpu_w),
+        (vrm_rise, vrm_w),
+    ]
+    available = [(r, w) for r, w in component_weights if not np.isnan(r)]
+    if available:
+        total_w = sum(w for _, w in available)
+        weighted_rise = sum(r * w for r, w in available) / total_w
+        if forgive_intensity and not np.isnan(workload_overall):
+            adjusted_rise = max(0.0, weighted_rise - 10.0 * workload_overall)
+        else:
+            adjusted_rise = max(0.0, weighted_rise)
+        temp_score = max(0.0, min(100.0, 100.0 - (adjusted_rise / 40.0) * 100.0))
+    else:
+        weighted_rise = float("nan")
+        temp_score = float("nan")
+
+    high_total_rpm = _total_fan_rpm_under_mask(data, stats, high_mask)
+    if not np.isnan(high_total_rpm):
+        rpm_score = max(0.0, min(100.0, 100.0 - (high_total_rpm / 8000.0) * 100.0))
+    else:
+        rpm_score = float("nan")
+
+    if not np.isnan(temp_score) and not np.isnan(rpm_score):
+        score = temp_w * temp_score + rpm_w * rpm_score
+    elif not np.isnan(temp_score):
+        score = temp_score
+    else:
+        score = float("nan")
+
+    n = int(high_mask.sum()) if high_mask is not None else 0
+    total = int(len(high_mask)) if high_mask is not None else 0
+    return {
+        "score": score,
+        "temp_score": temp_score,
+        "rpm_score": rpm_score,
+        "weighted_rise": weighted_rise,
+        "cpu_rise": cpu_rise,
+        "gpu_rise": gpu_rise,
+        "vrm_rise": vrm_rise,
+        "high_total_rpm": high_total_rpm,
+        "n_samples": n,
+        "n_total": total,
+        "coverage": (n / total) if total else 0.0,
+    }
+
+
+def compute_score_variants(
+    data: ConfigData, stats: PerConfigStats
+) -> dict[str, dict[str, object]]:
+    """Return V0..V5 scores for one config, for the report's sensitivity panel.
+
+    V5 is the production score (same value as ``CoolingKPIs.cooling_score``);
+    the others are listed for transparency, so the user can see how the
+    ranking moves under different "high resource utilization" definitions.
+    """
+    system_col = stats.primary_temps.get("system")
+    ambient_median = (
+        _median_numeric(data.df[system_col])
+        if system_col and system_col in data.df.columns
+        else float("nan")
+    )
+
+    cpu_high = _compute_high_load_mask(data, stats, "cpu_total")
+    gpu_high = _compute_high_load_mask(data, stats, "gpu_core")
+    legacy_mask = cpu_high | gpu_high
+    workload = _compute_workload_intensity(data, stats, legacy_mask)
+    workload_overall = (
+        workload.overall
+        if workload and not np.isnan(workload.overall)
+        else float("nan")
+    )
+
+    cpu_load_col = stats.primary_loads.get("cpu_total")
+    gpu_load_col = stats.primary_loads.get("gpu_core")
+
+    def _ge(col: str | None, threshold: float) -> pd.Series:
+        if col is None or col not in data.df.columns:
+            return pd.Series(False, index=data.df.index)
+        s = pd.to_numeric(data.df[col], errors="coerce")
+        return (s >= threshold).fillna(False)
+
+    v0 = _score_with_mask(
+        data, stats, legacy_mask, workload_overall,
+        forgive_intensity=True, ambient_median=ambient_median,
+    )
+    v0["label"] = "V0 legacy"
+    v0["gate"] = (
+        "Pre-V5 production: temp 0.70 + rpm 0.30, weights cpu 4/7 / gpu 3/7 / vrm 1/7, "
+        "current absolute gate (CPU>=10% or GPU>=30%), with -10C * intensity forgiveness."
+    )
+
+    v1_mask = _ge(cpu_load_col, 70.0) | _ge(gpu_load_col, 70.0)
+    v1 = _score_with_mask(
+        data, stats, v1_mask, workload_overall,
+        forgive_intensity=True, ambient_median=ambient_median,
+    )
+    v1["label"] = "V1 tight"
+    v1["gate"] = "Tight load gate (CPU>=70% or GPU>=70%); legacy weights and forgiveness."
+
+    v2_mask = _per_sample_intensity_mask(data, stats, threshold=_V2_INTENSITY_THRESHOLD)
+    v2 = _score_with_mask(
+        data, stats, v2_mask, workload_overall,
+        forgive_intensity=True, ambient_median=ambient_median,
+    )
+    v2["label"] = "V2 intensity"
+    v2["gate"] = (
+        "Per-sample workload intensity (clock/Vcore/W blend) >= "
+        f"{_V2_INTENSITY_THRESHOLD}; legacy weights and forgiveness."
+    )
+
+    v3 = _score_with_mask(
+        data, stats, legacy_mask, workload_overall,
+        forgive_intensity=False, ambient_median=ambient_median,
+    )
+    v3["label"] = "V3 no-forgive"
+    v3["gate"] = "Current gate, legacy weights, but workload-intensity forgiveness removed."
+
+    v4_score = workload.score if workload and not np.isnan(workload.score) else float("nan")
+    v4 = {
+        "score": v4_score,
+        "temp_score": float("nan"),
+        "rpm_score": float("nan"),
+        "weighted_rise": float("nan"),
+        "cpu_rise": float("nan"),
+        "gpu_rise": float("nan"),
+        "vrm_rise": float("nan"),
+        "high_total_rpm": float("nan"),
+        "n_samples": 0,
+        "n_total": int(len(data.df.index)),
+        "coverage": float("nan"),
+        "label": "V4 intensity*",
+        "gate": (
+            "WorkloadIntensity score (clocks/Vcore/W blend, 0..100). NOT a cooling "
+            "score - listed to confirm captures are under similar silicon pressure."
+        ),
+    }
+
+    v5 = _score_v5_full(data, stats, ambient_median)
+    v5["label"] = "V5 production"
+    v5["gate"] = (
+        "Per-component matched-quantile masks (top "
+        f"{int(_V5_QUANTILE * 100)}% of own samples), "
+        f"weights cpu={_V5_CPU_W} / gpu={_V5_GPU_W} / vrm={_V5_VRM_W}, "
+        f"temp={_V5_TEMP_W} / rpm={_V5_RPM_W}; idle components "
+        f"(70th-pct load < {_V5_MIN_LOAD_FLOOR:g}%) dropped from the temp term."
+    )
+
+    return {"V0": v0, "V1": v1, "V2": v2, "V3": v3, "V4": v4, "V5": v5}
+
+
 # ---------- public ------------------------------------------------------------
 
 
@@ -408,66 +862,29 @@ def compute_cooling_kpis(
 
     workload = _compute_workload_intensity(data, stats, high_mask)
 
-    # Composite cooling score.
-    # Weights (of the final 100):
-    #   - Temperature term (70%): rise of CPU/GPU/VRM over ambient under load.
-    #       within: CPU 40% (4/7 of the term), GPU 30% (3/7), VRM 10% (1/7)
-    #       i.e. CPU is weighted 10 points more than GPU, VRM gets 10 points.
-    #       (rise_under_load = high-load median temp - ambient/System temp)
-    #   - Fan term (30%): total fan RPM under load, lower = better.
-    # Workload-intensity compensation:
-    #   Higher clocks/voltages/power inherently produce more heat and force
-    #   higher fan speeds, and that is *not* the airflow's fault. So before
-    #   scoring the temperature term we subtract up to 10 C of "forgiven rise"
-    #   proportional to the workload intensity (0..1). A pegged-out system
-    #   gets +10 C of headroom in the score; an idle run gets 0.
-    by_key = {h.hotspot_key: h for h in hotspots}
-
-    def _rise_under_load(key: str) -> float:
-        h = by_key.get(key)
-        if h is None:
-            return float("nan")
-        if not np.isnan(h.high_load_median) and not np.isnan(ambient_median):
-            return h.high_load_median - ambient_median
-        return h.temp_rise_over_ambient
-
-    cpu_rise = _rise_under_load("cpu_pkg")
-    gpu_rise = _rise_under_load("gpu_hotspot")
-    if np.isnan(gpu_rise):
-        gpu_rise = _rise_under_load("gpu_core")
-    vrm_rise = _rise_under_load("vrm")
-
-    # Weights are written as fractions of the 70% temperature budget;
-    # they sum to 1.0 inside the term so missing sensors don't shrink it.
-    component_weights = [
-        (cpu_rise, 4.0 / 7.0),   # CPU
-        (gpu_rise, 3.0 / 7.0),   # GPU
-        (vrm_rise, 1.0 / 7.0),   # VRM
-    ]
-    available = [(r, w) for r, w in component_weights if not np.isnan(r)]
-    if available:
-        total_w = sum(w for _, w in available)
-        weighted_rise = sum(r * w for r, w in available) / total_w
-        # Forgive up to 10 C of rise based on workload intensity.
-        intensity = workload.overall if workload and not np.isnan(workload.overall) else 0.0
-        adjusted_rise = max(0.0, weighted_rise - 10.0 * intensity)
-        # 0 C adjusted rise -> 100, 40 C -> 0.
-        temp_score = max(0.0, min(100.0, 100.0 - (adjusted_rise / 40.0) * 100.0))
-    else:
-        temp_score = float("nan")
-
-    if not np.isnan(high_total_rpm):
-        # 0 RPM total -> 100, 8000 RPM total -> ~0.
-        rpm_score = max(0.0, min(100.0, 100.0 - (high_total_rpm / 8000.0) * 100.0))
-    else:
-        rpm_score = float("nan")
-
-    if not np.isnan(temp_score) and not np.isnan(rpm_score):
-        cooling_score = 0.70 * temp_score + 0.30 * rpm_score
-    elif not np.isnan(temp_score):
-        cooling_score = temp_score
-    else:
-        cooling_score = float("nan")
+    # Composite cooling score (V5).
+    # See ``_score_v5_full`` and the module docstring for the full definition.
+    # Summary: each config is scored on its own top-30% busiest CPU samples
+    # for CPU rise, top-30% busiest GPU samples for GPU rise, and the union of
+    # the two for VRM rise and total fan RPM. Weights cpu=0.55 / gpu=0.30 /
+    # vrm=0.15 inside the temperature term; composite = 0.80 * temp + 0.20 * rpm.
+    # No workload-intensity forgiveness (the matched-quantile gate handles
+    # different workload distributions across configs more cleanly). Components
+    # whose 70th-percentile load is < 5% are treated as idle and dropped, so a
+    # capture with no GPU work doesn't get a bogus "0 GPU rise" credit.
+    #
+    # If V5 cannot produce a score (all components idle for this capture), we
+    # fall back to the legacy V0 formula so we never regress to "no score".
+    v5_full = _score_v5_full(data, stats, ambient_median)
+    cooling_score = float(v5_full["score"]) if not np.isnan(float(v5_full["score"])) else float("nan")
+    cooling_score_is_v5 = not np.isnan(cooling_score)
+    if not cooling_score_is_v5:
+        legacy = _score_with_mask(
+            data, stats, high_mask,
+            workload.overall if workload else float("nan"),
+            forgive_intensity=True, ambient_median=ambient_median,
+        )
+        cooling_score = float(legacy["score"])
 
     return CoolingKPIs(
         name=data.name,
@@ -476,14 +893,26 @@ def compute_cooling_kpis(
         median_total_fan_rpm=median_total_rpm,
         high_load_total_fan_rpm=high_total_rpm,
         cooling_score=cooling_score,
+        cooling_score_is_v5=cooling_score_is_v5,
         workload=workload,
         hotspots=hotspots,
     )
 
 
 def rank_configs(kpis: list[CoolingKPIs]) -> list[tuple[str, float]]:
-    """Return configs ranked by ``cooling_score`` descending (winner first)."""
-    scored = [(k.name, k.cooling_score) for k in kpis if not np.isnan(k.cooling_score)]
+    """Return configs ranked by ``cooling_score`` descending (winner first).
+
+    Configs whose score came from the V0 fallback (capture too idle for V5
+    matched-quantile gating) are excluded from the ranking - their score is
+    not directly comparable to V5-scored configs. They still appear in the
+    summary table with their fallback score, but no verdict is rendered for
+    them.
+    """
+    scored = [
+        (k.name, k.cooling_score)
+        for k in kpis
+        if not np.isnan(k.cooling_score) and k.cooling_score_is_v5
+    ]
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored
 
@@ -504,6 +933,7 @@ def kpis_to_summary_rows(kpis: list[CoolingKPIs]) -> list[dict[str, object]]:
             {
                 "name": k.name,
                 "cooling_score": k.cooling_score,
+                "cooling_score_is_v5": k.cooling_score_is_v5,
                 "ambient_median": k.ambient_median,
                 "cpu_high_load_median": cpu.high_load_median if cpu else float("nan"),
                 "cpu_rise": cpu.temp_rise_over_ambient if cpu else float("nan"),
