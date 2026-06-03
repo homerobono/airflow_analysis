@@ -1,10 +1,10 @@
 # FanControl profile
 
-Optimized FanControl 268 NET .10 (Windows 11) profile generated from the airflow
+Quiet-optimized FanControl 268 NET .10 (Windows 11) profile generated from the airflow
 analysis in `report.html` and the LibreHardwareMonitor CSV logs across Config A,
-B, C, and D. Goal: best cooling efficiency with a 60/40 CPU-to-GPU weighting,
-silent idle (case fans allowed to stall), tolerated noise at high load,
-hotspot/CPU safety overrides baked into the curves.
+B, C, and D. Goal: lower everyday noise with CPU/GPU-aware chassis airflow,
+silent idle where the case fans can stall, and steep safety ramps only once
+temperatures move into the high-load range.
 
 The Config D capture scored poorly because the V5 score saw both a high GPU
 hotspot rise over ambient and the highest total fan RPM. Its top-30% GPU samples
@@ -15,17 +15,18 @@ stock curve; this profile only adjusts the CPU and chassis fans.
 ## Files
 
 - `userConfig.json` - new optimized profile to import.
-- `userConfig.previous.json` - snapshot of the prior profile before this change.
+- `userConfig.previous.json` - older rollback snapshot kept for comparison.
 
 ## What's inside the profile
 
-- **CPU Fan**: graph curve on `Core (Tctl/Tdie)` with steps from 45->22% up to
-  84->100%; the 58-82 C band is slightly stronger than the first Config D
-  profile to claw back CPU rise without relying as much on chassis RPM.
+- **CPU Fan**: graph curve on `Core (Tctl/Tdie)` with a low 30-58 C band
+  (15-28%) to avoid desktop surge, then stronger ramps from 72 C upward and
+  84 C -> 100% for CPU safety.
 - **Pump Fan / FRONT_2 intake**, **System Fan #1 / FRONT_3 intake**, **System
   Fan #2 / TOP_1 exhaust**: each is a `Mix(Max)` of a CPU-anchored graph and a
-  GPU-anchored graph. The CPU-driven midrange is trimmed versus the first Config
-  D profile, while the GPU-driven midrange starts earlier. Because FanControl's
+  GPU-anchored graph. The low and mid bands are trimmed so normal 50-65 C CPU
+  spikes and moderate GPU temperatures do not immediately push chassis RPM.
+  Because FanControl's
   mixer only supports
   Min/Max/Avg/Sum (no arbitrary numeric weighting), the CPU graph is scaled
   higher than the GPU graph in the operating band so the resulting Max tracks
@@ -40,21 +41,23 @@ stock curve; this profile only adjusts the CPU and chassis fans.
 
 - `OneWayHysteresis: true` everywhere (fans only step down after temps cross
   the lower threshold).
-- Hysteresis: 2 C on the CPU curve and 3 C on chassis curves.
-- Response time: 2 (fast) for CPU, 3 (slower) for chassis.
-- Step up/down: faster step-up, slower step-down so the chassis fans glide
-  back to silent.
+- Hysteresis: 4 C on the CPU curve and 5 C on chassis curves.
+- Response time: 4 for CPU and 5 for chassis, reducing audible reactions to
+  short load spikes.
+- Step up/down: smaller command steps so the fans ramp in and out gradually.
 
 ### Idle interpretation used to design the floor
 
 From 144,012 CSV samples: idle = CPU load <12% and GPU 3D load <8%, with CPU
-temp 53-58 C median and GPU 38-49 C. Below ~45 C CPU and ~52 C GPU, every
-chassis fan and the GPU fans sit at 0% (allowed to stall) for silent idle.
+temp 53-58 C median and GPU 38-49 C. The quiet profile keeps the CPU fan near
+its low band through this range and holds chassis fans at 0% until higher CPU
+or GPU temperatures justify airflow.
 
 ### Safety guardrails (baked into curves)
 
-- CPU 82 C -> 95%, 84 C -> 100%.
-- Chassis fans at 79-81 C -> 95-100%.
+- CPU 82 C -> 94%, 84 C -> 100%.
+- Chassis fans retain steep high-temperature ramps: strongest curves reach
+  90-100% in the 82-88 C range.
 - GPU fans are not controlled by this profile; NVIDIA stock firmware handles
   their safety behavior.
 
@@ -96,11 +99,11 @@ folder, not the live one). There are two equivalent ways to load this profile:
   - CPU sustained <=75 C
   - GPU Core <=72 C, GPU Hot Spot <=86 C
   - Idle acoustics near-silent, some case fans showing 0%
-- If CPU runs hot first: raise CPU fan points at 64-75 C by +5% in the UI.
-- If GPU hotspot still runs hot first: raise the GPU-driven chassis curves
-  before changing NVIDIA's stock GPU fan behavior.
+- If CPU runs hot first: raise CPU fan points at 65-78 C by +5% in the UI.
+- If GPU hotspot runs hot first: raise the GPU-driven chassis curves from
+  68-84 C before changing NVIDIA's stock GPU fan behavior.
 
 ## Rollback
 
-`userConfig.previous.json` is the prior profile. To revert, follow Option A or
-B with that file instead.
+`userConfig.previous.json` is an older rollback profile. To revert, follow
+Option A or B with that file instead.
